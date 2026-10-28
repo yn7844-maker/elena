@@ -39,3 +39,12 @@ test('API HUB 헤더와 POST 본문, 인증 오류의 비재시도 확인',async
   await assert.rejects(naver('/search-trend/v1/search','TREND',{},async()=>{calls++;return new Response('{}',{status:401});}),/HTTP 401/);
   assert.equal(calls,2);
 });
+
+test('수집 시작일은 한국 시간 10/26 자정으로 고정되고 이후 겹침 수집도 하한을 지킨다', async()=>{
+  const {ARCHIVE_START,collectionCutoff}=await import('../lib/config.mjs');
+  const start=Date.parse('2026-10-25T15:00:00Z');
+  assert.equal(Date.parse(ARCHIVE_START),start);
+  assert.equal(collectionCutoff(null),start);
+  assert.equal(collectionCutoff('2026-10-27T00:00:00+09:00'),start);
+  assert.equal(collectionCutoff('2026-10-30T12:00:00+09:00'),Date.parse('2026-10-28T12:00:00+09:00'));
+});
