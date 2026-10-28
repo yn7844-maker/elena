@@ -6,7 +6,7 @@ export default async function handler(req,res) {
   res.setHeader('Cache-Control','private, no-store');
   const send=(status,data)=>res.status(status).json(data);
   const secret=process.env.SESSION_SECRET, password=process.env.ARCHIVE_PASSWORD;
-  const authConfigured=!!secret && secret.length>=12 && !!password && password.length>=8;
+  const authConfigured=!!secret && secret.length>=12 && !!password && password.length>=4;
   const route=new URL(req.url,'https://local').searchParams.get('route') || 'dashboard';
   if (!['GET','POST','PATCH'].includes(req.method)) return send(405,{error:'허용되지 않은 요청'});
   if (req.method!=='GET') {
@@ -23,7 +23,7 @@ export default async function handler(req,res) {
       return send(200,{ok:true});
     }
     if (route==='login' && req.method==='POST') {
-      if (!authConfigured) return send(503,{error:'수정 로그인에는 Vercel의 ARCHIVE_PASSWORD(8자 이상), SESSION_SECRET(12자 이상) 설정이 필요합니다.'});
+      if (!authConfigured) return send(503,{error:'수정 로그인에는 Vercel의 ARCHIVE_PASSWORD(4자 이상), SESSION_SECRET(12자 이상) 설정이 필요합니다.'});
       stage='database-setup';
       await setup();
       const bucket=sign(`${String(req.headers['x-vercel-forwarded-for']||'local').split(',')[0]}:${Math.floor(Date.now()/900000)}`,secret);
