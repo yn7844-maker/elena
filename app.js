@@ -1,40 +1,57 @@
+import {createPersonalStore,PERSONAL_STORAGE_KEY} from './personal-store.js';
 const $ = s => document.querySelector(s);
 const state = {topic:'',saved:false,days:7,search:'',page:1,data:null};
 const colors=['#315e50','#9aaf62','#c28b55','#7e8bb0','#bc7e8c'];
 let requestNumber=0;
 const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
 const date=(v,full=false)=>v?new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'numeric',day:'numeric',...(full?{hour:'2-digit',minute:'2-digit'}:{})}).format(new Date(v)):'—';
-async function api(route,body,method='POST') {
-  const response=await fetch(`/api/index?route=${route}`,body===undefined?{}:{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+const personalStore=createPersonalStore();
+let personalEntries=Object.create(null),storageWarning='';
+function readPersonal(){
+  try{personalEntries=personalStore.read();storageWarning='';}
+  catch{personalEntries=Object.create(null);storageWarning='브라우저의 개인 저장 데이터를 읽을 수 없습니다. 저장 권한과 브라우저 설정을 확인하세요.';}
+}
+readPersonal();
+function savePersonal(article,patch){
+  try{personalEntries=personalStore.write(article,patch);storageWarning='';}
+  catch{throw new Error('개인 저장에 실패했습니다. 브라우저 저장 공간이나 사이트 저장 권한을 확인하세요.');}
+}
+function savedArticles(){
+  const live=new Map((state.data?.articles||[]).map(row=>[row.url,row]));
+  const cutoff=state.days===0?0:Date.now()-state.days*86400000;
+  const search=state.search.toLowerCase();
+  return Object.values(personalEntries).filter(entry=>entry.saved||entry.note)
+    .map(entry=>({...entry,...live.get(entry.url),saved:entry.saved,note:entry.note}))
+    .filter(row=>(!state.topic||row.topics.includes(state.topic))&&
+      new Date(row.published_at).getTime()>=cutoff&&
+      (row.title+' '+row.description).toLowerCase().includes(search))
+    .sort((a,b)=>new Date(b.published_at)-new Date(a.published_at));
+}
+function visibleArticles(){
+  if(state.saved)return savedArticles();
+  return (state.data?.articles||[]).map(row=>({...row,saved:personalEntries[row.url]?.saved===true,note:personalEntries[row.url]?.note||''}));
+}
+async function api(route) {
+  const response=await fetch('/api/index?route='+route);
   const data=await response.json();
-  if(response.status===401 && !route.startsWith('login'))showLogin();
   if(!response.ok)throw new Error(data.error||'요청을 완료하지 못했습니다.');
   return data;
 }
-function showLogin(){
-  if($('#article-dialog').open)$('#article-dialog').close();
-  $('#login-message').textContent='즐겨찾기·메모를 사용하려면 로그인하세요.';
-  $('#dashboard').hidden=true;$('#login').hidden=false;$('#password').focus();
-}
-$('#edit-login').onclick=showLogin;
-$('#back-to-news').onclick=()=>{state.saved=false;load();};
 function notify(message){$('#notice').textContent=message;$('#notice').hidden=!message;}
 async function load(){
   const serial=++requestNumber;
+  if(state.saved){state.page=1;render();$('#refresh').disabled=false;return;}
   $('#refresh').disabled=true;
   try{
-    const params=new URLSearchParams({days:state.days,topic:state.topic,saved:state.saved?'1':'0',search:state.search});
+    const params=new URLSearchParams({days:state.days,topic:state.topic,search:state.search});
     const data=await api(`dashboard&${params}`);
     if(serial!==requestNumber)return;
     state.data=data;state.page=1;
-    $('#login').hidden=true;$('#dashboard').hidden=false;
     render();
-  }catch(e){if(serial!==requestNumber)return;if($('#dashboard').hidden)$('#login-message').textContent=e.message==='로그인이 필요합니다.'?'':e.message;else notify(e.message);}
+  }catch(e){if(serial!==requestNumber)return;notify(e.message);}
   finally{if(serial===requestNumber)$('#refresh').disabled=false;}
 }
 $('#today').textContent=new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',year:'numeric',month:'long',day:'numeric'}).format(new Date());
-$('#login-form').addEventListener('submit',async e=>{e.preventDefault();const button=e.currentTarget.querySelector('button');button.disabled=true;$('#login-message').textContent='확인 중…';try{await api('login',{password:$('#password').value});$('#password').value='';await load();}catch(e){$('#login-message').textContent=e.message;}finally{button.disabled=false;}});
-$('#logout').onclick=async()=>{try{await api('logout',{});state.data=null;state.saved=false;$('#articles').replaceChildren();$('#article-detail').replaceChildren();if($('#article-dialog').open)$('#article-dialog').close();await load();}catch(e){notify(e.message);}};
 $('#refresh').onclick=load;
 function chooseTopic(event){
   const button=event.target.closest('button[data-topic]');
@@ -43,15 +60,15 @@ function chooseTopic(event){
 }
 $('#topics').onclick=chooseTopic;
 $('#article-topics').onclick=chooseTopic;
-$('#saved').onclick=()=>{if(!state.data?.canEdit){showLogin();return;}state.saved=!state.saved;load();};
+$('#saved').onclick=()=>{state.saved=!state.saved;load();};
 $('#filters').onsubmit=e=>{e.preventDefault();state.search=$('#search').value.trim();load();};
 $('#days').onchange=e=>{state.days=Number(e.target.value);load();};
 $('#clear').onclick=()=>{Object.assign(state,{topic:'',saved:false,days:7,search:''});$('#search').value='';$('#days').value='7';load();};
 function keywordSearch(word){$('#search').value=word;state.search=word;load();}
 function render(){
-  const d=state.data,a=d.articles;
-  $('#edit-login').hidden=!!d.canEdit;$('#logout').hidden=!d.canEdit;
-  $('#saved-count').textContent=d.canEdit?a.filter(r=>r.saved).length.toLocaleString():'로그인 후';
+  const d=state.data||{articles:[],keywords:[],rising:[],risingReady:false,capped:false,runs:[],trends:null,coverage:{total:0}},a=visibleArticles();
+  $('.analysis-grid').hidden=state.saved;
+  $('#saved-count').textContent=savedArticles().length.toLocaleString();
   document.querySelectorAll('#topics button').forEach(b=>b.classList.toggle('active',b.dataset.topic===state.topic&&!state.saved));
   document.querySelectorAll('#article-topics button').forEach(button=>{
     const active=button.dataset.topic===state.topic;
@@ -61,15 +78,18 @@ function render(){
   $('#saved').classList.toggle('active',state.saved);
   $('#article-count').textContent=a.length.toLocaleString();
 
-  $('#top-word').textContent=d.keywords[0]?.word||'—';
+  $('#top-word-label').textContent=state.saved?'저장 위치':'주요 제목 단어';
+  $('#top-word').textContent=state.saved?'이 브라우저':d.keywords[0]?.word||'—';
+  $('#top-word-caption').textContent=state.saved?'다른 사람·기기와 공유되지 않음':'현재 필터 기준';
   const complete=d.runs.find(r=>r.finished_at);
   $('#last-run').textContent=date(complete?.finished_at,true);
-  $('#run-state').textContent=complete?({success:'정상 수집 완료',partial:'일부 수집 실패 · 아래 상태 확인',failed:'수집 실패 · 아래 상태 확인'}[complete.status]||complete.status):'GitHub Actions에서 첫 수집을 실행하세요';
+  $('#run-state').textContent=complete?({success:'정상 수집 완료',partial:'일부 수집 실패 · 아래 상태 확인',failed:'수집 실패 · 아래 상태 확인'}[complete.status]||complete.status):'수집 이력이 없습니다.';
   const messages=[];
-  if(!a.length)messages.push(d.coverage.total?'현재 조건에 해당하는 기사가 없습니다. 기간이나 필터를 바꿔보세요.':'아직 기사가 없습니다. GitHub Secrets를 입력한 뒤 Actions → Collect news → Run workflow를 실행하세요.');
-  if(d.capped)messages.push('조회 범위가 5,000건을 초과해 최신 5,000건만 분석합니다. 기간이나 주제를 좁혀주세요.');
+  if(!a.length&&!state.saved)messages.push(d.coverage.total?'현재 조건에 해당하는 기사가 없습니다. 기간이나 필터를 바꿔보세요.':'아직 수집된 기사가 없습니다. 잠시 후 다시 확인해 주세요.');
+  if(d.capped&&!state.saved)messages.push('조회 범위가 5,000건을 초과해 최신 5,000건만 분석합니다. 기간이나 주제를 좁혀주세요.');
   if(complete&&complete.status!=='success')messages.push('최근 수집에 오류가 있습니다. 페이지 아래 수집 상태를 확인하세요.');
   if(complete&&Date.now()-new Date(complete.finished_at)>12*3600000)messages.push('마지막 수집이 12시간 이상 지났습니다. GitHub Actions 예약 상태를 확인하세요.');
+  if(storageWarning)messages.push(storageWarning);
   notify(messages.join(' '));
   const chips=$('#keywords');chips.replaceChildren();
   d.keywords.forEach(k=>{const b=el('button',undefined,'chip');b.append(el('span',k.word),el('small',`${k.count}건`));b.onclick=()=>keywordSearch(k.word);chips.append(b);});
@@ -95,7 +115,9 @@ function render(){
 }
 function renderArticles(){
   const list=$('#articles');list.replaceChildren();
-  const rows=state.data.articles,start=(state.page-1)*15;
+  const rows=visibleArticles();
+  state.page=Math.max(1,Math.min(state.page,Math.ceil(rows.length/15)||1));
+  const start=(state.page-1)*15;
   rows.slice(start,start+15).forEach(a=>{
     const item=el('article',undefined,'news-item'),content=el('div'),meta=el('div',undefined,'news-meta');
     a.topics.forEach(t=>meta.append(el('span',t,'tag')));meta.append(el('span',date(a.published_at,true)));
@@ -104,11 +126,11 @@ function renderArticles(){
     if(a.note)content.append(el('div','메모가 있는 기사','note-mark'));
     const actions=el('div',undefined,'news-actions'),save=el('button',a.saved?'★':'☆',`bookmark${a.saved?' is-saved':''}`);
     save.setAttribute('aria-label',a.saved?'즐겨찾기 해제':'즐겨찾기 저장');save.setAttribute('aria-pressed',String(a.saved));
-    save.onclick=async()=>{if(!state.data?.canEdit){showLogin();return;}save.disabled=true;try{await api('article',{id:a.id,saved:!a.saved},'PATCH');await load();}catch(e){notify(e.message);save.disabled=false;}};
+    save.onclick=()=>{try{savePersonal(a,{saved:!a.saved});render();}catch(e){notify(e.message);}};
     const link=el('a','원문 보기 ↗');link.href=a.url;link.target='_blank';link.rel='noopener noreferrer';
     actions.append(save,link);item.append(content,actions);list.append(item);
   });
-  if(!rows.length)list.append(el('div','기사 수집 후 이곳에 새로운 이야기가 쌓입니다.','empty'));
+  if(!rows.length)list.append(el('div',state.saved?'현재 조건에 맞는 개인 저장 기사가 없습니다. 기사 옆 별표를 눌러 저장해 보세요.':'기사 수집 후 이곳에 새로운 이야기가 쌓입니다.','empty'));
   const max=Math.max(1,Math.ceil(rows.length/15));$('#page-label').textContent=`${state.page} / ${max}`;$('#prev').disabled=state.page===1;$('#next').disabled=state.page===max;
 }
 $('#prev').onclick=()=>{state.page--;renderArticles();};$('#next').onclick=()=>{state.page++;renderArticles();};
@@ -116,18 +138,11 @@ $('#close-dialog').onclick=()=>$('#article-dialog').close();
 function detail(a){
   const box=$('#article-detail');box.replaceChildren();
   box.append(el('span',`${a.topics.join(' · ')} / ${date(a.published_at,true)}`,'eyebrow'),el('h2',a.title),el('p',a.description),el('small','네이버 검색 결과 설명문입니다. 기사 전문은 원문에서 확인하세요.','fine'));
-  if(!state.data?.canEdit){
-    const link=el('a','기사 원문 보기 ↗');link.href=a.url;link.target='_blank';link.rel='noopener noreferrer';
-    const login=el('button','메모·즐겨찾기 로그인','primary');login.onclick=showLogin;
-    const actions=el('div',undefined,'detail-actions');actions.append(link,login);
-    box.append(el('p','메모와 즐겨찾기는 로그인 후 사용할 수 있습니다.','fine'),actions);
-    $('#article-dialog').showModal();return;
-  }
-  const label=el('label','함께 쓰는 메모');label.htmlFor='note';
+  const label=el('label','나만의 메모 · 이 브라우저에 저장');label.htmlFor='note';
   const note=el('textarea');note.id='note';note.value=a.note;note.maxLength=5000;
   const actions=el('div',undefined,'detail-actions'),save=el('button','메모 저장','primary'),link=el('a','기사 원문 보기 ↗'),message=el('div','','detail-feedback');message.setAttribute('role','status');
   link.href=a.url;link.target='_blank';link.rel='noopener noreferrer';
-  save.onclick=async()=>{save.disabled=true;try{await api('article',{id:a.id,note:note.value},'PATCH');a.note=note.value;message.textContent='저장했습니다.';renderArticles();}catch(e){message.textContent=e.message;}finally{save.disabled=false;}};
+  save.onclick=()=>{try{savePersonal(a,{note:note.value});a.note=note.value;message.textContent='이 브라우저에 저장했습니다.';render();}catch(e){message.textContent=e.message;}};
   actions.append(save,link);box.append(label,note,actions,message);$('#article-dialog').showModal();
 }
 function renderTrend(batch){
@@ -148,4 +163,7 @@ function renderTrend(batch){
   const t=el('table'),head=el('tr');['날짜',...groups.map(g=>g.title)].forEach(x=>head.append(el('th',x)));t.append(head);
   dates.forEach(d=>{const row=el('tr');row.append(el('td',d));groups.forEach(g=>{const n=g.data.find(p=>p.period===d)?.ratio;row.append(el('td',n==null?'—':Number(n).toFixed(1)));});t.append(row);});table.append(t);
 }
+window.addEventListener('storage',event=>{
+  if(event.key===PERSONAL_STORAGE_KEY||event.key===null){readPersonal();if(state.data||state.saved)render();}
+});
 load();

@@ -49,47 +49,35 @@ test('수집 시작일은 한국 시간 10/26 자정으로 고정되고 이후 �
   assert.equal(collectionCutoff('2026-10-30T12:00:00+09:00'),Date.parse('2026-10-28T12:00:00+09:00'));
 });
 
-test('공개 대시보드는 인증 설정 없이 조회되고 메모·저장 상태와 수정은 보호된다',async()=>{
+test('대시보드는 공개 조회 전용이며 기존 쿠키로도 공유 메모를 읽거나 수정할 수 없다',async()=>{
   const {readFile}=await import('node:fs/promises');
-  const originalPassword=process.env.ARCHIVE_PASSWORD, originalSecret=process.env.SESSION_SECRET;
   let writes=0;
-  const fixture={id:'1',title:'금리 동향',published_at:new Date().toISOString(),topics:['금융'],saved:true,note:'비공개 메모'};
-  globalThis.publicAccessTest={
+  globalThis.personalApiTest={
     setup:async()=>{},
     query:async(sql)=>{
-      if(sql.startsWith('SELECT a.*'))return {rows:[fixture]};
+      if(sql.startsWith('SELECT a.'))return {rows:[{id:'1',title:'금리 동향',published_at:new Date().toISOString(),topics:['금융'],saved:true,note:'기존 공유 메모'}]};
       if(sql.startsWith('SELECT MIN'))return {rows:[{first_seen:new Date(),total:1}]};
-      if(sql.startsWith('UPDATE articles')){writes++;return {rowCount:1};}
+      if(!sql.startsWith('SELECT'))writes++;
       return {rows:[]};
     }
   };
-  try {
+  try{
     let source=await readFile(new URL('../api/index.mjs',import.meta.url),'utf8');
     source=source.replace("import {ARCHIVE_START} from '../lib/config.mjs';","const ARCHIVE_START='2026-10-26T00:00:00+09:00';")
-      .replace("import {query,setup} from '../lib/db.mjs';","const {query,setup}=globalThis.publicAccessTest;")
+      .replace("import {query,setup} from '../lib/db.mjs';","const {query,setup}=globalThis.personalApiTest;")
       .replace("'../lib/core.mjs'",JSON.stringify(new URL('../lib/core.mjs',import.meta.url).href));
     const {default:handler}=await import('data:text/javascript,'+encodeURIComponent(source));
-    async function invoke(route,method='GET',token){
-      const res={setHeader(){},status(code){this.code=code;return this},json(body){this.body=body}};
-      await handler({url:'/api/index?route='+route,method,body:{id:'1',note:'수정'},headers:{host:'archive.test',origin:'https://archive.test',...(token?{cookie:'elena_session='+token}:{})}},res);
-      return res;
+    async function invoke(route,method='GET'){
+      const res={headers:{},setHeader(k,v){this.headers[k]=v},status(code){this.code=code;return this},json(body){this.body=body}};
+      await handler({url:'/api/index?route='+route,method,body:{id:'1',note:'외부 수정'},headers:{cookie:'elena_session=obsolete'}},res);return res;
     }
-    delete process.env.ARCHIVE_PASSWORD;delete process.env.SESSION_SECRET;
-    let res=await invoke('dashboard');
-    assert.equal(res.code,200);assert.equal(res.body.canEdit,false);
-    assert.equal(res.body.articles[0].note,'');assert.equal(res.body.articles[0].saved,false);
-    assert.equal((await invoke('article','PATCH')).code,401);
-    assert.equal((await invoke('dashboard&saved=1')).code,401);assert.equal(writes,0);
-    process.env.ARCHIVE_PASSWORD='password';process.env.SESSION_SECRET='abcdefghijkl';
-    const token=session(process.env.SESSION_SECRET);
-    res=await invoke('dashboard','GET',token);
-    assert.equal(res.code,200);assert.equal(res.body.canEdit,true);assert.equal(res.body.articles[0].note,'비공개 메모');
-    assert.equal((await invoke('article','PATCH',token)).code,200);assert.equal(writes,1);
-  } finally {
-    if(originalPassword===undefined)delete process.env.ARCHIVE_PASSWORD;else process.env.ARCHIVE_PASSWORD=originalPassword;
-    if(originalSecret===undefined)delete process.env.SESSION_SECRET;else process.env.SESSION_SECRET=originalSecret;
-    delete globalThis.publicAccessTest;
-  }
+    let res=await invoke('dashboard');assert.equal(res.code,200);
+    assert.equal('note' in res.body.articles[0],false);assert.equal('saved' in res.body.articles[0],false);
+    assert.match(res.headers['Set-Cookie'],/Max-Age=0/);
+    assert.equal((await invoke('article','PATCH')).code,405);
+    assert.equal((await invoke('login','POST')).code,405);
+    assert.equal((await invoke('login')).code,404);assert.equal(writes,0);
+  }finally{delete globalThis.personalApiTest;}
 });
 
 test('DB 오류 진단은 원문 연결 정보 없이 안전한 코드와 실패 단계만 반환한다',async()=>{
@@ -138,4 +126,28 @@ test('기사 기반 확장은 URL 중복을 제외하고 3건·2사이트의 근
   assert.equal(buildQueryPlan([row('one.example',1),row('one.example',2),row('one.example',3)],0)['금융'].filter(q=>q.kind==='discovered').length,0);
   assert.equal(buildQueryPlan(base.map(r=>({...r,title:'연극 공연'})),0)['금융'].filter(q=>q.kind==='discovered').length,0);
   assert.equal(buildQueryPlan(base.map(r=>({...r,topic:'AI',title:'chair 새소식'})),0).AI.filter(q=>q.kind==='discovered').length,0);
+});
+
+test('개인 저장은 브라우저별로 격리되고 재로드 후 유지되며 서버 메모를 자동 복사하지 않는다',async()=>{
+  const {createPersonalStore,PERSONAL_STORAGE_KEY}=await import('../personal-store.js');
+  const memory=new Map(),storage={getItem:k=>memory.get(k)??null,setItem:(k,v)=>memory.set(k,v)};
+  const article={id:'1',url:'https://example.com/news',title:'개인 기사',description:'설명',published_at:new Date().toISOString(),topics:['AI'],saved:true,note:'서버 공유 메모'};
+  const store=createPersonalStore(()=>storage);
+  store.write(article,{saved:true});
+  assert.equal(createPersonalStore(()=>storage).read()[article.url].saved,true);
+  assert.equal(store.read()[article.url].note,'');
+  store.write(article,{note:'내 메모'});store.write(article,{saved:false});
+  assert.equal(store.read()[article.url].note,'내 메모');assert.equal(store.read()[article.url].saved,false);
+  assert.ok(memory.get(PERSONAL_STORAGE_KEY).includes('내 메모'));
+  const other=createPersonalStore(()=>({getItem:()=>null,setItem(){}}));
+  assert.equal(Object.keys(other.read()).length,0);
+  store.write(article,{note:''});assert.equal(Object.keys(store.read()).length,0);
+});
+test('개인 저장 실패와 손상 데이터는 성공으로 처리하지 않는다',async()=>{
+  const {createPersonalStore}=await import('../personal-store.js');
+  const article={url:'https://example.com/news',title:'기사',published_at:new Date().toISOString(),topics:['금융']};
+  const blocked=createPersonalStore(()=>({getItem:()=>null,setItem(){throw new Error('quota');}}));
+  assert.throws(()=>blocked.write(article,{saved:true}),/quota/);
+  assert.throws(()=>createPersonalStore(()=>({getItem:()=>'{bad json'})).read());
+  assert.throws(()=>createPersonalStore(()=>{throw new Error('blocked')}).read(),/blocked/);
 });
