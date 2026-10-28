@@ -41,19 +41,19 @@ export default async function handler(req,res) {
     }
     if (route!=='dashboard'||req.method!=='GET') return send(404,{error:'없는 경로'});
     const url=new URL(req.url,'https://local');
-    const requestedDays=Number(url.searchParams.get('days')||7);
-    const days=[1,7,30,90].includes(requestedDays)?requestedDays:7;
+    const requestedDays=Number(url.searchParams.get('days')??7);
+    const days=[0,1,7,30,90].includes(requestedDays)?requestedDays:7;
     const topic=url.searchParams.get('topic')||'', search=(url.searchParams.get('search')||'').slice(0,100);
     const saved=url.searchParams.get('saved')==='1';
-    const params=[Math.max(8,days),topic,search,saved];
+    const params=[days===0?0:Math.max(8,days),topic,search,saved];
     const {rows}=await query(`SELECT a.*, COALESCE((SELECT jsonb_agg(DISTINCT q.topic) FROM article_queries q WHERE q.article_id=a.id),'[]') AS topics,
       COALESCE((SELECT jsonb_agg(DISTINCT q.keyword) FROM article_queries q WHERE q.article_id=a.id),'[]') AS queries
-      FROM articles a WHERE a.published_at>=NOW()-($1*INTERVAL '1 day') AND a.published_at<=NOW()
+      FROM articles a WHERE ($1::int=0 OR a.published_at>=NOW()-($1*INTERVAL '1 day')) AND a.published_at<=NOW()
       AND ($2='' OR EXISTS(SELECT 1 FROM article_queries q WHERE q.article_id=a.id AND q.topic=$2))
       AND ($3='' OR strpos(lower(a.title||' '||a.description),lower($3))>0)
       AND (NOT $4 OR a.saved) ORDER BY a.published_at DESC LIMIT 5001`,params);
     const capped=rows.length>5000, sample=rows.slice(0,5000), now=Date.now();
-    const selected=sample.filter(r=>+new Date(r.published_at)>=now-days*86400000);
+    const selected=sample.filter(r=>days===0||+new Date(r.published_at)>=now-days*86400000);
     const [{rows:runs},{rows:batches},{rows:[coverage]}]=await Promise.all([
       query('SELECT * FROM collection_runs ORDER BY started_at DESC LIMIT 5'),
       query('SELECT * FROM trend_batches ORDER BY fetched_at DESC LIMIT 1'),

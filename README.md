@@ -50,7 +50,7 @@ API HUB 인증은 `X-NCP-APIGW-API-KEY-ID`, `X-NCP-APIGW-API-KEY` 헤더를 사�
 
 1. https://vercel.com → **Add New → Project → Import Git Repository**에서 이 저장소를 선택합니다.
 2. **Framework Preset: Other**, **Root Directory: 저장소 루트**.
-3. Build Command는 비워두고, Output Directory는 기본값(루트), Install Command는 `npm install --omit=dev --ignore-scripts`로 설정합니다.
+3. Build Command는 비워두고, Output Directory는 기본값(루트), Install Command는 `npm ci --omit=dev --ignore-scripts`로 설정합니다.
 4. 환경 변수(Environment Variables)에 다음 3개를 입력합니다. Production에 적용하고, Preview 환경에서도 사용할 경우 별도로 선택합니다.
 
 | Vercel 변수 이름 | 넣을 값 |
@@ -73,7 +73,7 @@ API HUB 인증은 `X-NCP-APIGW-API-KEY-ID`, `X-NCP-APIGW-API-KEY` 헤더를 사�
 - 왼쪽 주제, 기간, 제목·설명 검색으로 기사와 주요 단어를 필터링합니다.
 - 주요 단어를 누르면 해당 단어로 기사 목록을 검색합니다.
 - 기사 제목을 누르면 설명문·공유 메모·원문 링크를 볼 수 있습니다. 전문 수집은 하지 않습니다.
-- 별표를 누르면 즐겨찾기에 저장합니다. 저장한 기사도 선택 기간이 적용됩니다. 오래된 기사는 90일 필터에서 확인하세요.
+- 별표를 누르면 즐겨찾기에 저장합니다. 저장한 기사도 선택 기간이 적용됩니다. 오래된 기사는 전체 기간 필터에서 확인하세요.
 - 뉴스 필터는 기사 및 주요/급상승 단어에 적용됩니다. 검색 관심도 그래프는 별도로 고정한 5개 그룹의 최근 30일입니다.
 - 새로고침은 DB를 다시 읽습니다. 즉시 수집하려면 GitHub Actions의 Run workflow를 사용합니다.
 

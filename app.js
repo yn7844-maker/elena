@@ -58,7 +58,7 @@ function render(){
   d.rising.forEach(k=>{const b=el('button');b.append(el('span',k.word),el('em',`+${k.change.toFixed(1)}%p`));b.onclick=()=>keywordSearch(k.word);rising.append(b);});
   if(!d.rising.length)rising.append(el('p',d.risingReady?'현재 조건에서 상승 기준에 해당하는 단어가 없습니다.':'수집 이력이 8일 이상 쌓이고 비교 기사가 확보되면 표시합니다.','fine'));
   $('#list-title').textContent=state.saved?'저장한 이야기':state.topic?`${state.topic}, 새로운 이야기`:'오늘의 발견';
-  $('#scope-label').textContent=`최근 ${state.days===1?'24시간':state.days+'일'} · ${a.length.toLocaleString()}건`;
+  $('#scope-label').textContent=`${state.days===0?'전체 기간':'최근 '+(state.days===1?'24시간':state.days+'일')} · ${a.length.toLocaleString()}건`;
   renderArticles();renderTrend(d.trends);
   const runs=$('#runs');runs.replaceChildren();
   d.runs.forEach(r=>{const item=el('div',`${date(r.started_at,true)} · ${r.status} · ${r.fetched}건 처리`,'run-row');(r.errors||[]).forEach(error=>item.append(el('div',error,'error')));runs.append(item);});

@@ -3,6 +3,7 @@ import {topics,trendGroups} from '../lib/config.mjs';
 import {naver} from '../lib/naver.mjs';
 import {cleanText,safeUrl,koreaDate} from '../lib/core.mjs';
 
+async function collect() {
 await setup();
 const {rows:[run]} = await query('INSERT INTO collection_runs DEFAULT VALUES RETURNING id');
 const errors = []; let fetched = 0;
@@ -54,3 +55,6 @@ try {
   process.exitCode=1;
   console.error('수집 실패. DB 연결 및 설정을 확인하세요.');
 } finally { await close(); }
+
+}
+collect().catch(async()=>{ console.error("수집 시작 실패. Secrets의 DATABASE_URL과 DB 상태를 확인하세요."); process.exitCode=1; await close(); });
