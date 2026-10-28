@@ -111,3 +111,31 @@ test('DB 오류 진단은 원문 연결 정보 없이 안전한 코드와 실패
     assert.ok(!JSON.stringify(response.body).includes('private-host'));
   } finally {delete globalThis.dbDiagnosticTest;}
 });
+
+test('수집 계획은 기초 검색어와 순환 연관어를 포함하고 실행별로 확장어를 바꾼다',async()=>{
+  const {buildQueryPlan}=await import('../lib/discovery.mjs');
+  const {topics,collectionPolicy}=await import('../lib/config.mjs');
+  const first=buildQueryPlan([],0),next=buildQueryPlan([],1);
+  assert.deepEqual(Object.keys(first),Object.keys(topics));
+  for(const topic of Object.keys(topics)){
+    assert.deepEqual(first[topic].filter(q=>q.kind==='core').map(q=>q.keyword),topics[topic]);
+    assert.equal(first[topic].filter(q=>q.kind==='related').length,3);
+    assert.notDeepEqual(first[topic].filter(q=>q.kind==='related'),next[topic].filter(q=>q.kind==='related'));
+    assert.equal(new Set(first[topic].map(q=>q.keyword.toLowerCase())).size,first[topic].length);
+  }
+  const maxBaseCalls=Object.values(first).flat().reduce((sum,q)=>sum+q.maxPages,0);
+  const maxDiscoveredCalls=Object.keys(topics).length*collectionPolicy.discoveredPerTopic*collectionPolicy.expandedPages;
+  assert.ok(maxBaseCalls+maxDiscoveredCalls<=collectionPolicy.maxNewsCalls);
+});
+test('기사 기반 확장은 URL 중복을 제외하고 3건·2사이트의 근거와 주제 문맥을 요구한다',async()=>{
+  const {buildQueryPlan}=await import('../lib/discovery.mjs');
+  const row=(host,id,title='네오증권 주식',topic='금융')=>({url:'https://'+host+'/'+id,title,description:'',topic});
+  const base=[row('one.example',1),row('two.example',2),row('one.example',3)];
+  let plan=buildQueryPlan([...base,base[0]],0);
+  const found=plan['금융'].filter(q=>q.kind==='discovered');
+  assert.equal(found.length,1);assert.equal(found[0].keyword,'네오증권 주식');assert.equal(found[0].evidenceCount,3);
+  assert.equal(buildQueryPlan(base.slice(0,2),0)['금융'].filter(q=>q.kind==='discovered').length,0);
+  assert.equal(buildQueryPlan([row('one.example',1),row('one.example',2),row('one.example',3)],0)['금융'].filter(q=>q.kind==='discovered').length,0);
+  assert.equal(buildQueryPlan(base.map(r=>({...r,title:'연극 공연'})),0)['금융'].filter(q=>q.kind==='discovered').length,0);
+  assert.equal(buildQueryPlan(base.map(r=>({...r,topic:'AI',title:'chair 새소식'})),0).AI.filter(q=>q.kind==='discovered').length,0);
+});

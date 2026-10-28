@@ -81,7 +81,17 @@ function render(){
   $('#scope-label').textContent=`${state.topic||'전체'} · 최신순 · ${state.days===0?'전체 기간':'최근 '+(state.days===1?'24시간':state.days+'일')} · ${a.length.toLocaleString()}건`;
   renderArticles();renderTrend(d.trends);
   const runs=$('#runs');runs.replaceChildren();
-  d.runs.forEach(r=>{const item=el('div',`${date(r.started_at,true)} · ${r.status} · ${r.fetched}건 처리`,'run-row');(r.errors||[]).forEach(error=>item.append(el('div',error,'error')));runs.append(item);});
+  d.runs.forEach(r=>{const item=el('div',`${date(r.started_at,true)} · ${r.status} · ${r.fetched}건 처리`,'run-row');(r.errors||[]).forEach(error=>item.append(el('div',error,'error')));
+    if(r.search_plan&&Object.keys(r.search_plan).length){
+      const detail=el('details'),summary=el('summary','이번 수집에 사용한 검색어');
+      detail.append(summary);
+      Object.entries(r.search_plan).forEach(([topic,queries])=>{
+        const line=el('p',topic+' · '+queries.map(q=>q.keyword+(q.kind==='discovered'?' (기사에서 발견)':q.kind==='related'?' (연관)':'')).join(', '));
+        detail.append(line);
+      });
+      item.append(detail);
+    }
+    runs.append(item);});
 }
 function renderArticles(){
   const list=$('#articles');list.replaceChildren();
