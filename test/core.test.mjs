@@ -91,3 +91,23 @@ test('공개 대시보드는 인증 설정 없이 조회되고 메모·저장 �
     delete globalThis.publicAccessTest;
   }
 });
+
+test('DB 오류 진단은 원문 연결 정보 없이 안전한 코드와 실패 단계만 반환한다',async()=>{
+  const {readFile}=await import('node:fs/promises');
+  globalThis.dbDiagnosticTest={query:async()=>({rows:[]}),setup:async()=>{
+    throw Object.assign(new Error('postgresql://private-user:private-password@private-host/database'),{code:'28P01'});
+  }};
+  try {
+    let source=await readFile(new URL('../api/index.mjs',import.meta.url),'utf8');
+    source=source.replace("import {ARCHIVE_START} from '../lib/config.mjs';","const ARCHIVE_START='2026-10-26T00:00:00+09:00';")
+      .replace("import {query,setup} from '../lib/db.mjs';","const {query,setup}=globalThis.dbDiagnosticTest;")
+      .replace("'../lib/core.mjs'",JSON.stringify(new URL('../lib/core.mjs',import.meta.url).href));
+    const {default:handler}=await import('data:text/javascript,'+encodeURIComponent(source));
+    const response={setHeader(){},status(code){this.code=code;return this},json(body){this.body=body}};
+    await handler({url:'/api/index?route=dashboard',method:'GET',headers:{}},response);
+    assert.equal(response.code,503);assert.equal(response.body.code,'28P01');
+    assert.equal(response.body.stage,'database-setup');
+    assert.ok(!JSON.stringify(response.body).includes('private-password'));
+    assert.ok(!JSON.stringify(response.body).includes('private-host'));
+  } finally {delete globalThis.dbDiagnosticTest;}
+});
