@@ -38,6 +38,7 @@ export default async function handler(req,res) {
     const publicRead=route==='dashboard' && req.method==='GET';
     if (!publicRead && !authenticated) return send(401,{error:'즐겨찾기·메모 수정에는 로그인이 필요합니다.'});
     if (publicRead && new URL(req.url,'https://local').searchParams.get('saved')==='1' && !authenticated) return send(401,{error:'저장한 기사 조회에는 로그인이 필요합니다.'});
+    stage='database-setup';
     await setup();
     if (route==='article' && req.method==='PATCH') {
       const {id,saved,note}=req.body||{};
