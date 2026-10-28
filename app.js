@@ -36,7 +36,13 @@ $('#today').textContent=new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',y
 $('#login-form').addEventListener('submit',async e=>{e.preventDefault();const button=e.currentTarget.querySelector('button');button.disabled=true;$('#login-message').textContent='확인 중…';try{await api('login',{password:$('#password').value});$('#password').value='';await load();}catch(e){$('#login-message').textContent=e.message;}finally{button.disabled=false;}});
 $('#logout').onclick=async()=>{try{await api('logout',{});state.data=null;state.saved=false;$('#articles').replaceChildren();$('#article-detail').replaceChildren();if($('#article-dialog').open)$('#article-dialog').close();await load();}catch(e){notify(e.message);}};
 $('#refresh').onclick=load;
-$('#topics').onclick=e=>{const b=e.target.closest('button');if(!b)return;state.topic=b.dataset.topic;state.saved=false;load();};
+function chooseTopic(event){
+  const button=event.target.closest('button[data-topic]');
+  if(!button)return;
+  state.topic=button.dataset.topic;state.saved=false;load();
+}
+$('#topics').onclick=chooseTopic;
+$('#article-topics').onclick=chooseTopic;
 $('#saved').onclick=()=>{if(!state.data?.canEdit){showLogin();return;}state.saved=!state.saved;load();};
 $('#filters').onsubmit=e=>{e.preventDefault();state.search=$('#search').value.trim();load();};
 $('#days').onchange=e=>{state.days=Number(e.target.value);load();};
@@ -47,6 +53,11 @@ function render(){
   $('#edit-login').hidden=!!d.canEdit;$('#logout').hidden=!d.canEdit;
   $('#saved-count').textContent=d.canEdit?a.filter(r=>r.saved).length.toLocaleString():'로그인 후';
   document.querySelectorAll('#topics button').forEach(b=>b.classList.toggle('active',b.dataset.topic===state.topic&&!state.saved));
+  document.querySelectorAll('#article-topics button').forEach(button=>{
+    const active=button.dataset.topic===state.topic;
+    button.classList.toggle('active',active);
+    button.setAttribute('aria-pressed',String(active));
+  });
   $('#saved').classList.toggle('active',state.saved);
   $('#article-count').textContent=a.length.toLocaleString();
 
@@ -66,8 +77,8 @@ function render(){
   const rising=$('#rising');rising.replaceChildren();
   d.rising.forEach(k=>{const b=el('button');b.append(el('span',k.word),el('em',`+${k.change.toFixed(1)}%p`));b.onclick=()=>keywordSearch(k.word);rising.append(b);});
   if(!d.rising.length)rising.append(el('p',d.risingReady?'현재 조건에서 상승 기준에 해당하는 단어가 없습니다.':'수집 이력이 8일 이상 쌓이고 비교 기사가 확보되면 표시합니다.','fine'));
-  $('#list-title').textContent=state.saved?'저장한 이야기':state.topic?`${state.topic}, 새로운 이야기`:'오늘의 발견';
-  $('#scope-label').textContent=`${state.days===0?'전체 기간':'최근 '+(state.days===1?'24시간':state.days+'일')} · ${a.length.toLocaleString()}건`;
+  $('#list-title').textContent=state.saved?'저장한 이야기':'오늘의 발견';
+  $('#scope-label').textContent=`${state.topic||'전체'} · 최신순 · ${state.days===0?'전체 기간':'최근 '+(state.days===1?'24시간':state.days+'일')} · ${a.length.toLocaleString()}건`;
   renderArticles();renderTrend(d.trends);
   const runs=$('#runs');runs.replaceChildren();
   d.runs.forEach(r=>{const item=el('div',`${date(r.started_at,true)} · ${r.status} · ${r.fetched}건 처리`,'run-row');(r.errors||[]).forEach(error=>item.append(el('div',error,'error')));runs.append(item);});
