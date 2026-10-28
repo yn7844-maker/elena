@@ -1,4 +1,4 @@
-import {ARCHIVE_START} from '../lib/config.mjs';
+import {ARCHIVE_START,trendGroups} from '../lib/config.mjs';
 import {query,setup} from '../lib/db.mjs';
 import {keywords,rising} from '../lib/core.mjs';
 
@@ -10,12 +10,34 @@ export default async function handler(req,res) {
     res.setHeader('Allow','GET');
     return send(405,{error:'개인 메모와 즐겨찾기는 브라우저에 저장됩니다. 서버 수정 기능은 제공하지 않습니다.'});
   }
-  if(route!=='dashboard')return send(404,{error:'없는 경로'});
+  if(!['dashboard','hot-topics'].includes(route))return send(404,{error:'없는 경로'});
   // 기존 세션 쿠키는 더 이상 사용하지 않습니다.
   if(String(req.headers.cookie||'').includes('elena_session='))
     res.setHeader('Set-Cookie','elena_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0');
   let stage='request';
   try {
+    if(route==='hot-topics'){
+      const params=new URL(req.url,'https://local').searchParams;
+      const date=params.get('date')||'',group=trendGroups.find(g=>g.groupName===params.get('group'));
+      const day=new Date(date+'T00:00:00Z');
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(day.getTime())||day.toISOString().slice(0,10)!==date||!group)
+        return send(400,{error:'조회할 날짜와 검색 관심도 항목을 확인하세요.'});
+      const start=new Date(date+'T00:00:00+09:00'),end=new Date(start.getTime()+86400000);
+      if(end.getTime()<=Date.parse(ARCHIVE_START))
+        return send(200,{date,group:group.groupName,topics:[],articleCount:0,capped:false,message:'이 날짜는 아카이브 수집 시작일 이전입니다.'});
+      stage='database-setup';await setup();
+      stage='hot-topics-query';
+      const {rows}=await query(`SELECT a.title,a.published_at FROM articles a
+        WHERE a.published_at >= $1::timestamptz AND a.published_at < $2::timestamptz
+        AND a.published_at >= $3::timestamptz
+        AND EXISTS(SELECT 1 FROM unnest($4::text[]) AS terms(term)
+          WHERE strpos(lower(a.title||' '||a.description),lower(terms.term))>0
+          OR EXISTS(SELECT 1 FROM article_queries q WHERE q.article_id=a.id AND q.keyword=terms.term))
+        ORDER BY a.published_at DESC LIMIT 4001`,[start,end,ARCHIVE_START,group.keywords]);
+      const sample=rows.slice(0,4000);
+      return send(200,{date,group:group.groupName,topics:keywords(sample).slice(0,10),articleCount:sample.length,capped:rows.length>4000,
+        message:sample.length?'':'이 날짜·항목에 해당하는 수집 기사가 없습니다.'});
+    }
     stage='database-setup';
     await setup();
     const url=new URL(req.url,'https://local');
@@ -43,7 +65,7 @@ export default async function handler(req,res) {
     return send(200,{
       articles:selected.map(({note,saved,...article})=>article),keywords:keywords(selected),rising:enough&&!capped?rising(sample,now):[],
       risingReady:!!enough&&!capped, capped,runs,trends:batches[0]||null,coverage,
-      topics:Object.fromEntries(['금융','경제','사회','문화','AI','기타'].map(t=>[t,selected.filter(r=>r.topics.includes(t)).length])),
+      topics:Object.fromEntries(['금융','경제','AI','사회','문화','기타'].map(t=>[t,selected.filter(r=>r.topics.includes(t)).length])),
       scope:{days,topic,search},generatedAt:new Date(now).toISOString()
     });
   } catch (error) {

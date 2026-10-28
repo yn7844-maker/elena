@@ -63,7 +63,7 @@ test('대시보드는 공개 조회 전용이며 기존 쿠키로도 공유 메�
   };
   try{
     let source=await readFile(new URL('../api/index.mjs',import.meta.url),'utf8');
-    source=source.replace("import {ARCHIVE_START} from '../lib/config.mjs';","const ARCHIVE_START='2026-10-26T00:00:00+09:00';")
+    source=source.replace("'../lib/config.mjs'",JSON.stringify(new URL('../lib/config.mjs',import.meta.url).href))
       .replace("import {query,setup} from '../lib/db.mjs';","const {query,setup}=globalThis.personalApiTest;")
       .replace("'../lib/core.mjs'",JSON.stringify(new URL('../lib/core.mjs',import.meta.url).href));
     const {default:handler}=await import('data:text/javascript,'+encodeURIComponent(source));
@@ -87,7 +87,7 @@ test('DB 오류 진단은 원문 연결 정보 없이 안전한 코드와 실패
   }};
   try {
     let source=await readFile(new URL('../api/index.mjs',import.meta.url),'utf8');
-    source=source.replace("import {ARCHIVE_START} from '../lib/config.mjs';","const ARCHIVE_START='2026-10-26T00:00:00+09:00';")
+    source=source.replace("'../lib/config.mjs'",JSON.stringify(new URL('../lib/config.mjs',import.meta.url).href))
       .replace("import {query,setup} from '../lib/db.mjs';","const {query,setup}=globalThis.dbDiagnosticTest;")
       .replace("'../lib/core.mjs'",JSON.stringify(new URL('../lib/core.mjs',import.meta.url).href));
     const {default:handler}=await import('data:text/javascript,'+encodeURIComponent(source));
@@ -150,4 +150,37 @@ test('개인 저장 실패와 손상 데이터는 성공으로 처리하지 않�
   assert.throws(()=>blocked.write(article,{saved:true}),/quota/);
   assert.throws(()=>createPersonalStore(()=>({getItem:()=>'{bad json'})).read());
   assert.throws(()=>createPersonalStore(()=>{throw new Error('blocked')}).read(),/blocked/);
+});
+
+test('그래프 Hot topics는 한국 날짜와 항목을 검증하고 최대 10개의 실제 기사 키워드만 반환한다',async()=>{
+  const {readFile}=await import('node:fs/promises');
+  let calls=0;
+  const terms=['삼성전자','현대차','엔비디아','코스피','금리','환율','채권','증권','대출','은행','보험','배당'];
+  globalThis.hotTopicTest={
+    setup:async()=>{},
+    query:async(sql,params)=>{
+      calls++;assert.match(sql,/unnest/);
+      assert.equal(params[0].toISOString(),'2026-10-25T15:00:00.000Z');
+      assert.equal(params[1].toISOString(),'2026-10-26T15:00:00.000Z');
+      assert.ok(params[3].includes('주식'));
+      return {rows:terms.map(term=>({title:'주식 '+term}))};
+    }
+  };
+  try{
+    let source=await readFile(new URL('../api/index.mjs',import.meta.url),'utf8');
+    source=source.replace("'../lib/config.mjs'",JSON.stringify(new URL('../lib/config.mjs',import.meta.url).href))
+      .replace("import {query,setup} from '../lib/db.mjs';","const {query,setup}=globalThis.hotTopicTest;")
+      .replace("'../lib/core.mjs'",JSON.stringify(new URL('../lib/core.mjs',import.meta.url).href));
+    const {default:handler}=await import('data:text/javascript,'+encodeURIComponent(source));
+    const invoke=async(date,group)=>{
+      const res={setHeader(){},status(code){this.code=code;return this},json(body){this.body=body}};
+      await handler({url:'/api/index?route=hot-topics&'+new URLSearchParams({date,group}),method:'GET',headers:{}},res);
+      return res;
+    };
+    let res=await invoke('2026-10-26','증시');
+    assert.equal(res.code,200);assert.equal(res.body.articleCount,12);assert.equal(res.body.topics.length,10);
+    res=await invoke('2026-10-25','증시');assert.equal(res.body.topics.length,0);assert.match(res.body.message,/수집 시작일 이전/);
+    assert.equal((await invoke('2026-02-30','증시')).code,400);
+    assert.equal((await invoke('2026-10-26','없는항목')).code,400);assert.equal(calls,1);
+  }finally{delete globalThis.hotTopicTest;}
 });

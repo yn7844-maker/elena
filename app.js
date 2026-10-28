@@ -145,20 +145,25 @@ function detail(a){
   save.onclick=()=>{try{savePersonal(a,{note:note.value});a.note=note.value;message.textContent='이 브라우저에 저장했습니다.';render();}catch(e){message.textContent=e.message;}};
   actions.append(save,link);box.append(label,note,actions,message);$('#article-dialog').showModal();
 }
+const hotTopicCache=new Map();
+let dismissTrendPopup=()=>{};
+document.addEventListener('pointerdown',event=>{if(!$('#trend-chart').contains(event.target))dismissTrendPopup();});
 function renderTrend(batch){
+  dismissTrendPopup();
   const chart=$('#trend-chart'),legend=$('#trend-legend'),table=$('#trend-table');chart.replaceChildren();legend.replaceChildren();table.replaceChildren();
   if(!batch?.payload?.results?.length){chart.append(el('div','검색어 트렌드 수집 결과가 아직 없습니다.','empty'));$('#trend-info').textContent='트렌드 API 인증 정보와 수집 실행 결과를 확인하세요.';return;}
+  const points=[];
   const data=batch.payload,groups=data.results,dates=[...new Set(groups.flatMap(g=>g.data.map(p=>p.period)))].sort();
   const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 520 210');svg.setAttribute('role','img');svg.setAttribute('aria-label','최근 30일 검색 관심도. 상세 값은 아래 날짜별 표에서 확인할 수 있습니다.');
   const add=(tag,attrs,text)=>{const n=document.createElementNS(ns,tag);for(const [k,v]of Object.entries(attrs))n.setAttribute(k,v);if(text!==undefined)n.textContent=text;svg.append(n);return n;};
   [0,25,50,75,100].forEach(n=>{const y=175-n*1.5;add('line',{x1:32,x2:505,y1:y,y2:y,stroke:'#e8ede7','stroke-dasharray':'3 4'});add('text',{x:2,y:y+4,fill:'#87918b','font-size':10},n);});
   groups.forEach((g,i)=>{
     const map=new Map(g.data.map(p=>[p.period,p.ratio]));let path='',connected=false;
-    dates.forEach((d,j)=>{const n=map.get(d);if(n==null){connected=false;return;}const x=32+j/Math.max(1,dates.length-1)*473,y=175-Math.max(0,Math.min(100,n))*1.5;path+=`${connected?'L':'M'}${x},${y} `;connected=true;add('circle',{cx:x,cy:y,r:1.8,fill:colors[i%5]});});
+    dates.forEach((d,j)=>{const n=map.get(d);if(n==null){connected=false;return;}const x=32+j/Math.max(1,dates.length-1)*473,y=175-Math.max(0,Math.min(100,n))*1.5;path+=`${connected?'L':'M'}${x},${y} `;connected=true;points.push({x,y,date:d,dateIndex:j,groupIndex:i,group:g.title,ratio:n});const dot=add('circle',{cx:x,cy:y,r:1.8,fill:colors[i%5]});dot.setAttribute('data-trend-date',d);dot.setAttribute('data-trend-group',g.title);});
     add('path',{d:path,fill:'none',stroke:colors[i%5],'stroke-width':2});
     const l=el('span'),dot=el('i');dot.style.backgroundColor=colors[i%5];l.append(dot,document.createTextNode(g.title));legend.append(l);
   });
-  if(dates.length){add('text',{x:32,y:198,fill:'#87918b','font-size':10},dates[0].slice(5));add('text',{x:470,y:198,fill:'#87918b','font-size':10},dates.at(-1).slice(5));}chart.append(svg);
+  if(dates.length){add('text',{x:32,y:198,fill:'#87918b','font-size':10},dates[0].slice(5));add('text',{x:470,y:198,fill:'#87918b','font-size':10},dates.at(-1).slice(5));}chart.append(svg);attachTrendTopics(chart,svg,dates,groups,points);
   $('#trend-info').textContent=`${data.startDate} ~ ${data.endDate} · ${date(batch.fetched_at,true)} 갱신. 동일 요청 내 최대 검색량을 100으로 한 상대 지수이며 실제 검색 횟수가 아닙니다. 위 기사 필터와 별도로 고정 5개 그룹을 비교합니다.`;
   const t=el('table'),head=el('tr');['날짜',...groups.map(g=>g.title)].forEach(x=>head.append(el('th',x)));t.append(head);
   dates.forEach(d=>{const row=el('tr');row.append(el('td',d));groups.forEach(g=>{const n=g.data.find(p=>p.period===d)?.ratio;row.append(el('td',n==null?'—':Number(n).toFixed(1)));});t.append(row);});table.append(t);
@@ -166,4 +171,86 @@ function renderTrend(batch){
 window.addEventListener('storage',event=>{
   if(event.key===PERSONAL_STORAGE_KEY||event.key===null){readPersonal();if(state.data||state.saved)render();}
 });
+
+function attachTrendTopics(chart,svg,dates,groups,points){
+  if(!points.length)return;
+  const popup=el('div',undefined,'trend-tooltip');popup.hidden=true;popup.setAttribute('role','status');popup.setAttribute('aria-live','polite');chart.append(popup);
+  svg.setAttribute('tabindex','0');
+  svg.setAttribute('aria-label','검색 관심도 그래프. 마우스 또는 터치로 날짜를 선택하면 관련 기사 Hot topics를 확인할 수 있습니다. 키보드 좌우로 날짜, 위아래로 항목을 선택합니다.');
+  const ns='http://www.w3.org/2000/svg',guide=document.createElementNS(ns,'line'),marker=document.createElementNS(ns,'circle');
+  for(const [key,value]of Object.entries({y1:20,y2:175,stroke:'#758a80','stroke-dasharray':'3 4','pointer-events':'none'}))guide.setAttribute(key,value);
+  for(const [key,value]of Object.entries({r:4,stroke:'#fff','stroke-width':2,'pointer-events':'none'}))marker.setAttribute(key,value);
+  svg.append(guide,marker);
+  let activeKey='',timer,hideTimer,generation=0,current=points.at(-1);
+  function hide(){
+    generation++;clearTimeout(timer);clearTimeout(hideTimer);popup.hidden=true;activeKey='';
+    guide.setAttribute('visibility','hidden');marker.setAttribute('visibility','hidden');
+  }
+  dismissTrendPopup=hide;hide();
+  function place(point){
+    const p=svg.createSVGPoint();p.x=point.x;p.y=point.y;
+    const screen=p.matrixTransform(svg.getScreenCTM()),bounds=chart.getBoundingClientRect();
+    const width=popup.getBoundingClientRect().width;
+    popup.style.left=Math.max(0,Math.min(bounds.width-width,screen.x-bounds.left+14))+'px';
+    const height=popup.getBoundingClientRect().height;
+    popup.style.top=Math.max(0,screen.y-bounds.top+height+14>bounds.height?screen.y-bounds.top-height-12:screen.y-bounds.top+14)+'px';
+  }
+  function content(point,data,error){
+    popup.replaceChildren();
+    popup.append(el('strong',point.group+' · '+point.date),el('div','검색 관심도 '+Number(point.ratio).toFixed(1),'trend-tooltip-ratio'),el('h3','Hot topics · 최대 10개'));
+    if(error)popup.append(el('p','관련 키워드를 불러오지 못했습니다. 잠시 후 다시 확인하세요.','fine'));
+    else if(!data)popup.append(el('p','관련 기사를 확인하고 있습니다.','fine'));
+    else if(!data.topics.length)popup.append(el('p',data.message||'해당 날짜에 수집된 관련 기사가 없습니다.','fine'));
+    else {
+      const list=el('ol');
+      data.topics.forEach(topic=>{const item=el('li');item.append(el('span',topic.word),el('small',topic.count+'건'));list.append(item);});
+      popup.append(list,el('p',(data.capped?'최신 '+data.articleCount+'건':'관련 기사 '+data.articleCount+'건')+'의 제목 기준','fine'));
+    }
+    place(point);
+  }
+  function show(point){
+    clearTimeout(hideTimer);
+    const key=point.date+'|'+point.group;
+    if(key===activeKey&&!popup.hidden)return;
+    current=point;activeKey=key;const version=++generation;clearTimeout(timer);
+    guide.setAttribute('x1',point.x);guide.setAttribute('x2',point.x);guide.removeAttribute('visibility');
+    marker.setAttribute('cx',point.x);marker.setAttribute('cy',point.y);marker.setAttribute('fill',colors[point.groupIndex%5]);marker.removeAttribute('visibility');
+    popup.hidden=false;
+    const cached=hotTopicCache.get(key);
+    if(cached&&Date.now()-cached.at<300000){content(point,cached.data);return;}
+    content(point);
+    timer=setTimeout(async()=>{
+      try{
+        const data=await api('hot-topics&'+new URLSearchParams({date:point.date,group:point.group}));
+        hotTopicCache.set(key,{at:Date.now(),data});
+        if(hotTopicCache.size>200)hotTopicCache.delete(hotTopicCache.keys().next().value);
+        if(version===generation&&!popup.hidden)content(point,data);
+      }catch{if(version===generation&&!popup.hidden){activeKey='';content(point,null,true);}}
+    },180);
+  }
+  function nearest(event){
+    const p=svg.createSVGPoint();p.x=event.clientX;p.y=event.clientY;
+    const local=p.matrixTransform(svg.getScreenCTM().inverse());
+    if(local.x<25||local.x>515||local.y<10||local.y>185)return null;
+    return points.reduce((best,point)=>Math.hypot(point.x-local.x,point.y-local.y)<Math.hypot(best.x-local.x,best.y-local.y)?point:best,points[0]);
+  }
+  svg.addEventListener('pointermove',event=>{if(event.pointerType==='touch')return;const point=nearest(event);if(point)show(point);else hide();});
+  svg.addEventListener('click',event=>{const point=nearest(event);if(point)show(point);});
+  svg.addEventListener('pointerleave',event=>{if(event.pointerType!=='touch')hideTimer=setTimeout(hide,180);});
+  popup.addEventListener('pointerenter',()=>clearTimeout(hideTimer));
+  popup.addEventListener('pointerleave',hide);
+  svg.addEventListener('keydown',event=>{
+    if(event.key==='Escape'){hide();return;}
+    if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Enter',' '].includes(event.key))return;
+    event.preventDefault();
+    const dx=event.key==='ArrowLeft'?-1:event.key==='ArrowRight'?1:0;
+    const dy=event.key==='ArrowUp'?-1:event.key==='ArrowDown'?1:0;
+    const dateIndex=Math.max(0,Math.min(dates.length-1,current.dateIndex+dx));
+    const groupIndex=(current.groupIndex+dy+groups.length)%groups.length;
+    const point=points.find(p=>p.dateIndex===dateIndex&&p.groupIndex===groupIndex);
+    if(point)show(point);
+  });
+  svg.addEventListener('blur',hide);
+}
+
 load();

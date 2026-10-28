@@ -11,3 +11,20 @@
 .category-filter.active{background:var(--green);border-color:var(--green);color:#fff;font-weight:700}
 .category-filter:focus-visible{outline:2px solid var(--green)}
 @media(max-width:700px){.news-title-filters{gap:12px}.category-filters{gap:5px}.category-filter{padding:5px 11px;font-size:11px}.news-heading{align-items:flex-start}.news-heading>#scope-label{width:100%}}
+
+.brand{display:inline-block;font-size:26px;letter-spacing:-1px;white-space:nowrap;margin-bottom:32px}
+header{justify-content:flex-end}
+header>div{color:var(--ink)}
+header #today,header #refresh{font-size:14px;font-weight:700;color:var(--ink)}
+@media(max-width:700px){.brand{font-size:24px;margin-bottom:0}header #today,header #refresh{font-size:12px}}
+
+#trend-chart{position:relative}
+#trend-chart>svg:focus-visible{outline:2px solid var(--green);outline-offset:4px;border-radius:6px}
+.trend-tooltip{position:absolute;z-index:20;width:280px;max-width:100%;padding:16px;background:#fff;border:1px solid #d6e0d9;border-radius:10px;box-shadow:0 8px 28px #183d2929;color:var(--ink)}
+.trend-tooltip strong{display:block;font-size:12px}
+.trend-tooltip-ratio{font-size:11px;color:var(--muted);margin-top:3px}
+.trend-tooltip h3{font-size:13px;margin-top:12px}
+.trend-tooltip ol{margin:10px 0 0;padding-left:22px;font-size:12px}
+.trend-tooltip li{padding:3px 0}
+.trend-tooltip li small{float:right;color:var(--muted);font-size:10px}
+.trend-tooltip .fine{margin-top:8px}
