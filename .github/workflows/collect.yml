@@ -1,8 +1,9 @@
 name: Collect news
 on:
   schedule:
-    # UTC -> 한국 시간 07:17 / 12:17 / 18:17 / 23:17. 실행 지연 가능.
-    - cron: '17 22,3,9,14 * * *'
+    # UTC -> 한국 시간 07:00 / 08:00 / 09:00 / 10:00 / 11:00 / 15:00 / 18:00 / 21:00.
+    # 예약 시각은 수집 시작 기준이며 GitHub 상황에 따라 지연될 수 있습니다.
+    - cron: '0 0,1,2,6,9,12,22,23 * * *'
   workflow_dispatch:
 permissions:
   contents: read
