@@ -1,3 +1,4 @@
+import {ARCHIVE_START} from '../lib/config.mjs';
 import {query,setup} from '../lib/db.mjs';
 import {equal,session,validSession,sign,keywords,rising} from '../lib/core.mjs';
 
@@ -45,10 +46,10 @@ export default async function handler(req,res) {
     const days=[0,1,7,30,90].includes(requestedDays)?requestedDays:7;
     const topic=url.searchParams.get('topic')||'', search=(url.searchParams.get('search')||'').slice(0,100);
     const saved=url.searchParams.get('saved')==='1';
-    const params=[days===0?0:Math.max(8,days),topic,search,saved];
+    const params=[days===0?0:Math.max(8,days),topic,search,saved,ARCHIVE_START];
     const {rows}=await query(`SELECT a.*, COALESCE((SELECT jsonb_agg(DISTINCT q.topic) FROM article_queries q WHERE q.article_id=a.id),'[]') AS topics,
       COALESCE((SELECT jsonb_agg(DISTINCT q.keyword) FROM article_queries q WHERE q.article_id=a.id),'[]') AS queries
-      FROM articles a WHERE ($1::int=0 OR a.published_at>=NOW()-($1*INTERVAL '1 day')) AND a.published_at<=NOW()
+      FROM articles a WHERE ($1::int=0 OR a.published_at>=NOW()-($1*INTERVAL '1 day')) AND a.published_at<=NOW() AND a.published_at >= $5::timestamptz
       AND ($2='' OR EXISTS(SELECT 1 FROM article_queries q WHERE q.article_id=a.id AND q.topic=$2))
       AND ($3='' OR strpos(lower(a.title||' '||a.description),lower($3))>0)
       AND (NOT $4 OR a.saved) ORDER BY a.published_at DESC LIMIT 5001`,params);
@@ -57,7 +58,7 @@ export default async function handler(req,res) {
     const [{rows:runs},{rows:batches},{rows:[coverage]}]=await Promise.all([
       query('SELECT * FROM collection_runs ORDER BY started_at DESC LIMIT 5'),
       query('SELECT * FROM trend_batches ORDER BY fetched_at DESC LIMIT 1'),
-      query('SELECT MIN(first_seen) AS first_seen,COUNT(*)::int AS total FROM articles')
+      query('SELECT MIN(first_seen) AS first_seen,COUNT(*)::int AS total FROM articles WHERE published_at >= $1::timestamptz',[ARCHIVE_START])
     ]);
     const enough=coverage.first_seen && +new Date(coverage.first_seen)<=now-8*86400000;
     return send(200,{
