@@ -6,7 +6,7 @@ export default async function handler(req,res) {
   res.setHeader('Cache-Control','private, no-store');
   const send=(status,data)=>res.status(status).json(data);
   const secret=process.env.SESSION_SECRET, password=process.env.ARCHIVE_PASSWORD;
-  if (!secret || secret.length<12 || !password || password.length<8) return send(503,{error:'Vercel에 ARCHIVE_PASSWORD(8자 이상), SESSION_SECRET(12자 이상)을 설정하세요.'});
+  const authConfigured=!!secret && secret.length>=12 && !!password && password.length>=8;
   const route=new URL(req.url,'https://local').searchParams.get('route') || 'dashboard';
   if (!['GET','POST','PATCH'].includes(req.method)) return send(405,{error:'허용되지 않은 요청'});
   if (req.method!=='GET') {
@@ -15,13 +15,14 @@ export default async function handler(req,res) {
     if (origin!==req.headers.host) return send(403,{error:'출처 확인 실패'});
   }
   const cookie = String(req.headers.cookie||'').split(';').map(v=>v.trim()).find(v=>v.startsWith('elena_session='))?.slice(14);
-  const authenticated=validSession(cookie,secret);
+  const authenticated=authConfigured && validSession(cookie,secret);
   try {
     if (route==='logout' && req.method==='POST') {
       res.setHeader('Set-Cookie','elena_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0');
       return send(200,{ok:true});
     }
     if (route==='login' && req.method==='POST') {
+      if (!authConfigured) return send(503,{error:'수정 로그인에는 Vercel의 ARCHIVE_PASSWORD(8자 이상), SESSION_SECRET(12자 이상) 설정이 필요합니다.'});
       await setup();
       const bucket=sign(`${String(req.headers['x-vercel-forwarded-for']||'local').split(',')[0]}:${Math.floor(Date.now()/900000)}`,secret);
       const {rows:[limit]}=await query(`INSERT INTO login_limits(bucket,expires_at) VALUES($1,NOW()+INTERVAL '30 minutes')
@@ -32,7 +33,9 @@ export default async function handler(req,res) {
       res.setHeader('Set-Cookie',`elena_session=${session(secret)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=604800`);
       return send(200,{ok:true});
     }
-    if (!authenticated) return send(401,{error:'로그인이 필요합니다.'});
+    const publicRead=route==='dashboard' && req.method==='GET';
+    if (!publicRead && !authenticated) return send(401,{error:'즐겨찾기·메모 수정에는 로그인이 필요합니다.'});
+    if (publicRead && new URL(req.url,'https://local').searchParams.get('saved')==='1' && !authenticated) return send(401,{error:'저장한 기사 조회에는 로그인이 필요합니다.'});
     await setup();
     if (route==='article' && req.method==='PATCH') {
       const {id,saved,note}=req.body||{};
@@ -62,7 +65,8 @@ export default async function handler(req,res) {
     ]);
     const enough=coverage.first_seen && +new Date(coverage.first_seen)<=now-8*86400000;
     return send(200,{
-      articles:selected,keywords:keywords(selected),rising:enough&&!capped?rising(sample,now):[],
+      canEdit:authenticated,
+      articles:selected.map(row=>authenticated?row:{...row,note:'',saved:false}),keywords:keywords(selected),rising:enough&&!capped?rising(sample,now):[],
       risingReady:!!enough&&!capped, capped,runs,trends:batches[0]||null,coverage,
       topics:Object.fromEntries(['금융','경제','사회','문화','기타'].map(t=>[t,selected.filter(r=>r.topics.includes(t)).length])),
       scope:{days,topic,search,saved},generatedAt:new Date(now).toISOString()
