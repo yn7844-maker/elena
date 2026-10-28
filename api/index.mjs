@@ -74,7 +74,7 @@ export default async function handler(req,res) {
       canEdit:authenticated,
       articles:selected.map(row=>authenticated?row:{...row,note:'',saved:false}),keywords:keywords(selected),rising:enough&&!capped?rising(sample,now):[],
       risingReady:!!enough&&!capped, capped,runs,trends:batches[0]||null,coverage,
-      topics:Object.fromEntries(['금융','경제','사회','문화','기타'].map(t=>[t,selected.filter(r=>r.topics.includes(t)).length])),
+      topics:Object.fromEntries(['금융','경제','사회','문화','AI','기타'].map(t=>[t,selected.filter(r=>r.topics.includes(t)).length])),
       scope:{days,topic,search,saved},generatedAt:new Date(now).toISOString()
     });
   } catch (error) {
