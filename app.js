@@ -7,10 +7,17 @@ const date=(v,full=false)=>v?new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seo
 async function api(route,body,method='POST') {
   const response=await fetch(`/api/index?route=${route}`,body===undefined?{}:{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const data=await response.json();
-  if(response.status===401){$('#dashboard').hidden=true;$('#login').hidden=false;}
+  if(response.status===401 && !route.startsWith('login'))showLogin();
   if(!response.ok)throw new Error(data.error||'요청을 완료하지 못했습니다.');
   return data;
 }
+function showLogin(){
+  if($('#article-dialog').open)$('#article-dialog').close();
+  $('#login-message').textContent='즐겨찾기·메모를 사용하려면 로그인하세요.';
+  $('#dashboard').hidden=true;$('#login').hidden=false;$('#password').focus();
+}
+$('#edit-login').onclick=showLogin;
+$('#back-to-news').onclick=()=>{state.saved=false;load();};
 function notify(message){$('#notice').textContent=message;$('#notice').hidden=!message;}
 async function load(){
   const serial=++requestNumber;
@@ -27,20 +34,22 @@ async function load(){
 }
 $('#today').textContent=new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',year:'numeric',month:'long',day:'numeric'}).format(new Date());
 $('#login-form').addEventListener('submit',async e=>{e.preventDefault();const button=e.currentTarget.querySelector('button');button.disabled=true;$('#login-message').textContent='확인 중…';try{await api('login',{password:$('#password').value});$('#password').value='';await load();}catch(e){$('#login-message').textContent=e.message;}finally{button.disabled=false;}});
-$('#logout').onclick=async()=>{try{await api('logout',{});state.data=null;$('#articles').replaceChildren();$('#dashboard').hidden=true;$('#login').hidden=false;$('#login-message').textContent='';}catch(e){notify(e.message);}};
+$('#logout').onclick=async()=>{try{await api('logout',{});state.data=null;state.saved=false;$('#articles').replaceChildren();$('#article-detail').replaceChildren();if($('#article-dialog').open)$('#article-dialog').close();await load();}catch(e){notify(e.message);}};
 $('#refresh').onclick=load;
 $('#topics').onclick=e=>{const b=e.target.closest('button');if(!b)return;state.topic=b.dataset.topic;state.saved=false;load();};
-$('#saved').onclick=()=>{state.saved=!state.saved;load();};
+$('#saved').onclick=()=>{if(!state.data?.canEdit){showLogin();return;}state.saved=!state.saved;load();};
 $('#filters').onsubmit=e=>{e.preventDefault();state.search=$('#search').value.trim();load();};
 $('#days').onchange=e=>{state.days=Number(e.target.value);load();};
 $('#clear').onclick=()=>{Object.assign(state,{topic:'',saved:false,days:7,search:''});$('#search').value='';$('#days').value='7';load();};
 function keywordSearch(word){$('#search').value=word;state.search=word;load();}
 function render(){
   const d=state.data,a=d.articles;
+  $('#edit-login').hidden=!!d.canEdit;$('#logout').hidden=!d.canEdit;
+  $('#saved-count').textContent=d.canEdit?a.filter(r=>r.saved).length.toLocaleString():'로그인 후';
   document.querySelectorAll('#topics button').forEach(b=>b.classList.toggle('active',b.dataset.topic===state.topic&&!state.saved));
   $('#saved').classList.toggle('active',state.saved);
   $('#article-count').textContent=a.length.toLocaleString();
-  $('#saved-count').textContent=a.filter(r=>r.saved).length.toLocaleString();
+
   $('#top-word').textContent=d.keywords[0]?.word||'—';
   const complete=d.runs.find(r=>r.finished_at);
   $('#last-run').textContent=date(complete?.finished_at,true);
@@ -74,7 +83,7 @@ function renderArticles(){
     if(a.note)content.append(el('div','메모가 있는 기사','note-mark'));
     const actions=el('div',undefined,'news-actions'),save=el('button',a.saved?'★':'☆',`bookmark${a.saved?' is-saved':''}`);
     save.setAttribute('aria-label',a.saved?'즐겨찾기 해제':'즐겨찾기 저장');save.setAttribute('aria-pressed',String(a.saved));
-    save.onclick=async()=>{save.disabled=true;try{await api('article',{id:a.id,saved:!a.saved},'PATCH');await load();}catch(e){notify(e.message);save.disabled=false;}};
+    save.onclick=async()=>{if(!state.data?.canEdit){showLogin();return;}save.disabled=true;try{await api('article',{id:a.id,saved:!a.saved},'PATCH');await load();}catch(e){notify(e.message);save.disabled=false;}};
     const link=el('a','원문 보기 ↗');link.href=a.url;link.target='_blank';link.rel='noopener noreferrer';
     actions.append(save,link);item.append(content,actions);list.append(item);
   });
@@ -86,6 +95,13 @@ $('#close-dialog').onclick=()=>$('#article-dialog').close();
 function detail(a){
   const box=$('#article-detail');box.replaceChildren();
   box.append(el('span',`${a.topics.join(' · ')} / ${date(a.published_at,true)}`,'eyebrow'),el('h2',a.title),el('p',a.description),el('small','네이버 검색 결과 설명문입니다. 기사 전문은 원문에서 확인하세요.','fine'));
+  if(!state.data?.canEdit){
+    const link=el('a','기사 원문 보기 ↗');link.href=a.url;link.target='_blank';link.rel='noopener noreferrer';
+    const login=el('button','메모·즐겨찾기 로그인','primary');login.onclick=showLogin;
+    const actions=el('div',undefined,'detail-actions');actions.append(link,login);
+    box.append(el('p','메모와 즐겨찾기는 로그인 후 사용할 수 있습니다.','fine'),actions);
+    $('#article-dialog').showModal();return;
+  }
   const label=el('label','함께 쓰는 메모');label.htmlFor='note';
   const note=el('textarea');note.id='note';note.value=a.note;note.maxLength=5000;
   const actions=el('div',undefined,'detail-actions'),save=el('button','메모 저장','primary'),link=el('a','기사 원문 보기 ↗'),message=el('div','','detail-feedback');message.setAttribute('role','status');
