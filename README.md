@@ -1,6 +1,6 @@
 # ELENA · 나만의 뉴스 아카이브
 
-1~2명이 함께 사용하는 비밀번호 보호 뉴스 대시보드입니다. 금융·경제·사회·문화·기타 기사, 원문 링크, 공유 즐겨찾기·메모, 제목 주요 단어·급상승 단어, 네이버 검색어 트렌드를 제공합니다.
+기사와 대시보드는 로그인 없이 볼 수 있고, 즐겨찾기·메모는 비밀번호 로그인 후 사용하는 뉴스 대시보드입니다. 금융·경제·사회·문화·기타 기사, 원문 링크, 공유 즐겨찾기·메모, 제목 주요 단어·급상승 단어, 네이버 검색어 트렌드를 제공합니다.
 
 ## 구조
 
@@ -8,10 +8,10 @@
 GitHub Actions (한국 시간 07:17 / 12:17 / 18:17 / 23:17 예정)
   → NAVER API HUB 뉴스 + 검색어 트렌드
   → Neon PostgreSQL에 저장
-  → Vercel의 보호된 API → 대시보드
+  → Vercel의 공개 조회 API → 대시보드 (수정은 로그인 필요)
 ```
 
-Vercel에서는 서버 파일에 데이터를 저장하지 않습니다. 별도 PostgreSQL이 필요합니다. DB는 Neon을 권장하며 Vercel과 같은 DB를 GitHub 수집 작업에서도 사용합니다. 저장소를 비공개로 바꾸어도 웹사이트가 자동으로 비공개가 되는 것은 아닙니다. 이 앱은 자체 비밀번호와 HttpOnly 서명 쿠키로 데이터 API를 보호합니다. 화면 HTML은 공개되어도 기사·메모·트렌드 데이터는 로그인해야 조회됩니다. 사용자별 계정은 없고 비밀번호·즐겨찾기·메모를 공유합니다.
+Vercel에서는 서버 파일에 데이터를 저장하지 않습니다. 별도 PostgreSQL이 필요합니다. DB는 Neon을 권장하며 Vercel과 같은 DB를 GitHub 수집 작업에서도 사용합니다. 저장소를 비공개로 바꾸어도 웹사이트가 자동으로 비공개가 되는 것은 아닙니다. 기사·제목 키워드·검색 트렌드는 로그인 없이 조회됩니다. 즐겨찾기·메모 조회 및 수정 API는 비밀번호와 HttpOnly 서명 쿠키로 보호합니다. 익명 응답에는 메모와 저장 상태가 포함되지 않습니다. 사이트 주소를 아는 사람은 누구나 기사를 볼 수 있습니다. 사용자별 계정은 없고 비밀번호·즐겨찾기·메모를 공유합니다.
 
 ## 1. 데이터베이스 준비
 
@@ -51,18 +51,18 @@ API HUB 인증은 `X-NCP-APIGW-API-KEY-ID`, `X-NCP-APIGW-API-KEY` 헤더를 사�
 1. https://vercel.com → **Add New → Project → Import Git Repository**에서 이 저장소를 선택합니다.
 2. **Framework Preset: Other**, **Root Directory: 저장소 루트**.
 3. Build Command는 비워두고, Output Directory는 기본값(루트), Install Command는 `npm ci --omit=dev --ignore-scripts`로 설정합니다.
-4. 환경 변수(Environment Variables)에 다음 3개를 입력합니다. Production에 적용하고, Preview 환경에서도 사용할 경우 별도로 선택합니다.
+4. 환경 변수(Environment Variables)에 다음 값을 입력합니다. 기사 공개 조회에는 `DATABASE_URL`만 필요하고, 수정 로그인을 사용하려면 비밀번호와 서명 키도 설정합니다. Production에 적용하고, Preview 환경에서도 사용할 경우 별도로 선택합니다.
 
 | Vercel 변수 이름 | 넣을 값 |
 |---|---|
 | `DATABASE_URL` | GitHub에 넣은 것과 동일한 Neon 연결 문자열 |
-| `ARCHIVE_PASSWORD` | 대시보드 입장 비밀번호. **임의의 8자 이상** 권장 |
+| `ARCHIVE_PASSWORD` | 즐겨찾기·메모 수정용 비밀번호. **임의의 8자 이상** 권장 |
 | `SESSION_SECRET` | 쿠키 서명용 키. 비밀번호와 다른 **임의의 12자 이상** |
 
 두 임의 값은 비밀번호 관리자로 생성하거나 로컬에서 각각 `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`를 실행해 생성할 수 있습니다. `SESSION_SECRET`은 사용자에게 공유하지 않습니다.
 
-5. Deploy를 누릅니다. 발급된 HTTPS 주소를 열고 `ARCHIVE_PASSWORD`로 로그인합니다.
-6. 함께 사용할 사람에게 주소와 입장 비밀번호만 전달합니다.
+5. Deploy를 누릅니다. 발급된 HTTPS 주소를 열면 기사·대시보드가 바로 표시됩니다. 상단 **수정 로그인**에서 `ARCHIVE_PASSWORD`로 로그인하면 즐겨찾기·메모를 사용할 수 있습니다.
+6. 기사를 공유할 사람에게 사이트 주소를 전달합니다. 즐겨찾기·메모 사용을 허용할 사람에게만 수정용 비밀번호를 전달합니다.
 
 환경 변수 변경 후에는 **Deployments → Redeploy**해야 새 값이 적용됩니다. `SESSION_SECRET` 변경 시 기존 로그인 쿠키는 모두 무효화됩니다. 비밀번호 변경 시 기존 로그인도 끊으려면 서명 키도 함께 변경하세요. 세션은 최대 7일입니다.
 
@@ -104,7 +104,7 @@ node --env-file=.env scripts/collect.mjs
 npx vercel dev
 ```
 
-쿠키는 `Secure`를 사용하므로 로컬 HTTP 로그인에는 제약이 있습니다. 실제 로그인·즐겨찾기·메모는 HTTPS Preview 배포에서 확인하세요. 배포 후 로그인 전 API가 401인지, 비밀번호 인증 후 읽기와 저장이 되는지, Actions 수집 후 새 기사가 나타나는지 확인하세요.
+쿠키는 `Secure`를 사용하므로 로컬 HTTP 로그인에는 제약이 있습니다. 실제 로그인·즐겨찾기·메모는 HTTPS Preview 배포에서 확인하세요. 배포 후 로그인 전 대시보드 API가 200이고 메모·저장 상태가 숨겨지는지, 미인증 수정 API가 401인지, 비밀번호 인증 후 저장이 되는지, Actions 수집 후 새 기사가 나타나는지 확인하세요.
 
 ## 공식 문서
 
