@@ -6,7 +6,7 @@ export default async function handler(req,res) {
   res.setHeader('Cache-Control','private, no-store');
   const send=(status,data)=>res.status(status).json(data);
   const secret=process.env.SESSION_SECRET, password=process.env.ARCHIVE_PASSWORD;
-  if (!secret || secret.length<32 || !password || password.length<20) return send(503,{error:'Vercel에 ARCHIVE_PASSWORD(20자 이상), SESSION_SECRET(32자 이상)을 설정하세요.'});
+  if (!secret || secret.length<12 || !password || password.length<8) return send(503,{error:'Vercel에 ARCHIVE_PASSWORD(8자 이상), SESSION_SECRET(12자 이상)을 설정하세요.'});
   const route=new URL(req.url,'https://local').searchParams.get('route') || 'dashboard';
   if (!['GET','POST','PATCH'].includes(req.method)) return send(405,{error:'허용되지 않은 요청'});
   if (req.method!=='GET') {
