@@ -48,3 +48,46 @@ test('수집 시작일은 한국 시간 10/26 자정으로 고정되고 이후 �
   assert.equal(collectionCutoff('2026-10-27T00:00:00+09:00'),start);
   assert.equal(collectionCutoff('2026-10-30T12:00:00+09:00'),Date.parse('2026-10-28T12:00:00+09:00'));
 });
+
+test('공개 대시보드는 인증 설정 없이 조회되고 메모·저장 상태와 수정은 보호된다',async()=>{
+  const {readFile}=await import('node:fs/promises');
+  const originalPassword=process.env.ARCHIVE_PASSWORD, originalSecret=process.env.SESSION_SECRET;
+  let writes=0;
+  const fixture={id:'1',title:'금리 동향',published_at:new Date().toISOString(),topics:['금융'],saved:true,note:'비공개 메모'};
+  globalThis.publicAccessTest={
+    setup:async()=>{},
+    query:async(sql)=>{
+      if(sql.startsWith('SELECT a.*'))return {rows:[fixture]};
+      if(sql.startsWith('SELECT MIN'))return {rows:[{first_seen:new Date(),total:1}]};
+      if(sql.startsWith('UPDATE articles')){writes++;return {rowCount:1};}
+      return {rows:[]};
+    }
+  };
+  try {
+    let source=await readFile(new URL('../api/index.mjs',import.meta.url),'utf8');
+    source=source.replace("import {ARCHIVE_START} from '../lib/config.mjs';","const ARCHIVE_START='2026-10-26T00:00:00+09:00';")
+      .replace("import {query,setup} from '../lib/db.mjs';","const {query,setup}=globalThis.publicAccessTest;")
+      .replace("'../lib/core.mjs'",JSON.stringify(new URL('../lib/core.mjs',import.meta.url).href));
+    const {default:handler}=await import('data:text/javascript,'+encodeURIComponent(source));
+    async function invoke(route,method='GET',token){
+      const res={setHeader(){},status(code){this.code=code;return this},json(body){this.body=body}};
+      await handler({url:'/api/index?route='+route,method,body:{id:'1',note:'수정'},headers:{host:'archive.test',origin:'https://archive.test',...(token?{cookie:'elena_session='+token}:{})}},res);
+      return res;
+    }
+    delete process.env.ARCHIVE_PASSWORD;delete process.env.SESSION_SECRET;
+    let res=await invoke('dashboard');
+    assert.equal(res.code,200);assert.equal(res.body.canEdit,false);
+    assert.equal(res.body.articles[0].note,'');assert.equal(res.body.articles[0].saved,false);
+    assert.equal((await invoke('article','PATCH')).code,401);
+    assert.equal((await invoke('dashboard&saved=1')).code,401);assert.equal(writes,0);
+    process.env.ARCHIVE_PASSWORD='password';process.env.SESSION_SECRET='abcdefghijkl';
+    const token=session(process.env.SESSION_SECRET);
+    res=await invoke('dashboard','GET',token);
+    assert.equal(res.code,200);assert.equal(res.body.canEdit,true);assert.equal(res.body.articles[0].note,'비공개 메모');
+    assert.equal((await invoke('article','PATCH',token)).code,200);assert.equal(writes,1);
+  } finally {
+    if(originalPassword===undefined)delete process.env.ARCHIVE_PASSWORD;else process.env.ARCHIVE_PASSWORD=originalPassword;
+    if(originalSecret===undefined)delete process.env.SESSION_SECRET;else process.env.SESSION_SECRET=originalSecret;
+    delete globalThis.publicAccessTest;
+  }
+});
