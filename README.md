@@ -56,8 +56,8 @@ API HUB 인증은 `X-NCP-APIGW-API-KEY-ID`, `X-NCP-APIGW-API-KEY` 헤더를 사�
 | Vercel 변수 이름 | 넣을 값 |
 |---|---|
 | `DATABASE_URL` | GitHub에 넣은 것과 동일한 Neon 연결 문자열 |
-| `ARCHIVE_PASSWORD` | 대시보드 입장 비밀번호. **임의의 20자 이상** 권장 |
-| `SESSION_SECRET` | 쿠키 서명용 키. 비밀번호와 다른 **임의의 32자 이상** |
+| `ARCHIVE_PASSWORD` | 대시보드 입장 비밀번호. **임의의 8자 이상** 권장 |
+| `SESSION_SECRET` | 쿠키 서명용 키. 비밀번호와 다른 **임의의 12자 이상** |
 
 두 임의 값은 비밀번호 관리자로 생성하거나 로컬에서 각각 `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`를 실행해 생성할 수 있습니다. `SESSION_SECRET`은 사용자에게 공유하지 않습니다.
 
