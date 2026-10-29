@@ -44,3 +44,9 @@ header #today,header #refresh{font-size:14px;font-weight:700;color:var(--ink)}
 .chip.chip-new small{color:#a64c4c}
 .keyword-new-mark{margin-left:5px;font-size:10px;color:#c43030;font-weight:700}
 .chip.chip-new:hover{background:#ffe5e3;color:#8f2020}
+
+.keyword-scope-toggle{margin:0 0 0 auto;max-width:100%;text-align:right;font-size:11px}
+.keyword-scope-toggle summary{color:var(--muted);white-space:nowrap}
+.keyword-scope-toggle .keyword-metadata{margin-top:8px}
+.keyword-scope-toggle .keyword-definition{font-size:10px;margin:5px 0 0;max-width:400px;overflow-wrap:anywhere}
+.keyword-help{font-size:12px;color:var(--muted);margin:0 0 18px}
