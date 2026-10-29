@@ -1,5 +1,9 @@
 name: Collect news
 on:
+  # Configuration changes also start one recovery collection.
+  push:
+    branches: [main]
+    paths: ['.github/workflows/collect.yml']
   schedule:
     # UTC -> 한국 시간 07:00 / 08:00 / 09:00 / 10:00 / 11:00 / 15:00 / 18:00 / 21:00.
     # GitHub는 정각을 보장하지 않습니다. 지연 시 경고만 남기고 수집은 계속합니다.
@@ -18,8 +22,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   collect:
-    # Switch only after confirming the external cron is working. Manual/external dispatch stays available.
-    if: github.event_name != 'schedule' || vars.COLLECTION_SCHEDULER != 'external'
+    # Keep built-in collection active until an external scheduler has actually been verified.
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:

@@ -58,7 +58,7 @@ API HUB 인증은 `X-NCP-APIGW-API-KEY-ID`, `X-NCP-APIGW-API-KEY` 헤더를 사�
 
 ## 무료 외부 예약 서비스 연결 (선택)
 
-cron-job.org가 GitHub의 workflow_dispatch API를 호출하도록 연결할 수 있습니다. [가입·토큰·예약 설정·연결 확인·기존 예약 전환 안내](docs/external-scheduler.md)를 따르세요. 외부 요청도 지연 시 경고만 남기고 수집을 계속합니다. GitHub 실행 대기는 남으므로 정각을 보장하지 않습니다. 연결 확인 후 Repository **Variable** `COLLECTION_SCHEDULER=external`을 등록하면 GitHub 자체 cron의 수집 job만 건너뛰고 외부·수동 호출은 유지합니다. Vercel 설정은 필요하지 않습니다.
+cron-job.org가 GitHub의 workflow_dispatch API를 호출하도록 연결할 수 있습니다. [가입·토큰·예약 설정·연결 확인·기존 예약 전환 안내](docs/external-scheduler.md)를 따르세요. 외부 요청도 지연 시 경고만 남기고 수집을 계속합니다. GitHub 실행 대기는 남으므로 정각을 보장하지 않습니다. **기본 GitHub 예약은 계속 유지합니다.** `COLLECTION_SCHEDULER` 변수로 예약을 끄던 기능은 제거했습니다. 이미 등록했다면 삭제해도 됩니다. 외부 예약이 실제로 실행되는 것을 확인한 뒤 기본 예약의 제거 여부를 정하세요. 두 예약을 모두 유지하면 중복 수집될 수 있습니다. 예약 설정 파일을 main에서 변경하면 복구 수집도 한 번 요청됩니다. Vercel 설정은 필요하지 않습니다.
 
 ## 4. Vercel 배포
 

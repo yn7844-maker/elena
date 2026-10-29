@@ -69,20 +69,13 @@ Authorization은 글자 `Bearer`, 공백 한 칸, 실제 토큰 순서입니다.
 - 실제 예약 확인은 지정 시각에 **GitHub → elena → Actions → Collect news**에서 확인합니다. 실행 이벤트는 `workflow_dispatch`로 표시되지만 로그가 `예약 수집 시작`이면 지연을 진단하는 외부 예약입니다.
 - Actions 실행이 성공하고 대시보드의 최근 수집 완료가 바뀌는 것까지 확인합니다. 완료 시각은 시작 시각보다 늦습니다. 화면의 새로고침으로 DB를 다시 읽을 수 있습니다.
 
-## 4. 외부 예약 확인 후 GitHub 자체 예약 끄기
+## 4. 기본 예약은 외부 연결 확인 전까지 유지
 
-처음에는 기존 예약을 유지합니다. 두 방식이 겹치는 기간에는 두 번 수집될 수 있으므로 연결 확인 후 바로 전환합니다.
+**`COLLECTION_SCHEDULER=external` 변수를 등록하지 않습니다.** 이 변수 하나로 기본 예약을 끄던 기능은 제거했습니다. 이미 추가했더라도 현재 코드에서는 무시되며 삭제해도 됩니다. 외부 서비스 미설정 상태에서 기본 예약까지 중단되는 것을 방지합니다.
 
-**GitHub 저장소 → Settings → Secrets and variables → Actions → Variables 탭 → New repository variable**.
+기본 GitHub 예약, 외부 호출, Run workflow 수동 실행을 모두 사용할 수 있습니다. 외부 작업을 등록하면 두 예약이 겹쳐 같은 시각에 두 번 수집될 수 있습니다. 먼저 외부 서비스에서 HTTP 204뿐 아니라 GitHub Actions 실제 수집 성공까지 확인한 다음 기본 cron의 제거 여부를 정하세요. GitHub에서 워크플로 전체를 Disable하면 외부 호출도 막히므로 Disable workflow는 누르지 않습니다.
 
-| 항목 | 값 |
-|---|---|
-| Name | `COLLECTION_SCHEDULER` |
-| Value | `external` |
-
-**Secret이 아니라 Variable입니다.** 이후 GitHub 자체 schedule 이벤트의 수집 job은 건너뛰고, 외부 호출과 Run workflow 수동 실행은 유지합니다. 워크플로 전체를 Disable하면 외부 호출도 막히므로 Disable workflow는 누르지 않습니다. Vercel에 이 변수를 추가하거나 Redeploy할 필요는 없습니다.
-
-외부 서비스에 문제가 생겨 기존 방식으로 돌아가려면 cron-job.org 작업을 먼저 비활성화하고 이 GitHub 변수를 삭제합니다.
+기본 예약을 제거하려면 `.github/workflows/collect.yml`의 `schedule` 항목만 제거하고 `workflow_dispatch`는 유지해야 합니다. **외부 예약이 검증되기 전에는 제거하지 마세요.** 예약 설정 파일 변경은 main에 반영될 때 즉시 복구 수집을 한 번 요청합니다. Vercel 환경 변수나 Redeploy는 필요하지 않습니다.
 
 ## 오류 확인
 

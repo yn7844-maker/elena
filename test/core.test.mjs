@@ -237,21 +237,18 @@ test('예약이 00:39까지 지연되어도 수집을 계속하고 수동 수집
 });
 
 
-test('외부 예약도 지연 진단을 적용하며 전환 변수는 GitHub 자체 예약만 끈다',async()=>{
+test('외부 전환 변수만으로 기본 예약이 꺼지지 않고 설정 변경 시 복구 수집을 요청한다',async()=>{
   const {readFile}=await import('node:fs/promises');
   const workflow=await readFile(new URL('../.github/workflows/collect.yml',import.meta.url),'utf8');
-  const condition=workflow.match(/    if: (.+)/)[1];
+  assert.equal(workflow.includes('vars.COLLECTION_SCHEDULER'),false);
+  assert.equal(/^    if:/m.test(workflow),false);
+  assert.match(workflow,/push:\n    branches: \[main\]\n    paths: \['\.github\/workflows\/collect\.yml'\]/);
   const trigger=workflow.match(/COLLECTION_TRIGGER: \$\{\{ (.+) \}\}/)[1];
-  const jobAllowed=Function('github','vars',`return (${condition})`);
   const collectionTrigger=Function('github','inputs',`return (${trigger})`);
-  for(const scheduler of ['', 'external']){
-    for(const event of ['schedule','workflow_dispatch']){
-      assert.equal(jobAllowed({event_name:event},{COLLECTION_SCHEDULER:scheduler}),
-        !(scheduler==='external'&&event==='schedule'));
-      for(const scheduled of [true,false]){
-        assert.equal(collectionTrigger({event_name:event},{scheduled}),
-          event==='schedule'||scheduled?'schedule':'workflow_dispatch');
-      }
+  for(const event of ['schedule','workflow_dispatch','push']){
+    for(const scheduled of [true,false]){
+      assert.equal(collectionTrigger({event_name:event},{scheduled}),
+        event==='schedule'||scheduled?'schedule':event);
     }
   }
   assert.match(workflow,/scheduled:[\s\S]*default: false[\s\S]*type: boolean/);
