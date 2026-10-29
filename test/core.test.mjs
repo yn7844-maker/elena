@@ -63,7 +63,7 @@ test('대시보드는 공개 조회 전용이며 기존 쿠키로도 공유 메�
   };
   try{
     let source=await readFile(new URL('../api/index.mjs',import.meta.url),'utf8');
-    source=source.replace("'../lib/config.mjs'",JSON.stringify(new URL('../lib/config.mjs',import.meta.url).href))
+    source=source.replace("'../lib/keyword-interval.mjs'",JSON.stringify(new URL('../lib/keyword-interval.mjs',import.meta.url).href)).replace("'../lib/config.mjs'",JSON.stringify(new URL('../lib/config.mjs',import.meta.url).href))
       .replace("import {query,setup} from '../lib/db.mjs';","const {query,setup}=globalThis.personalApiTest;")
       .replace("'../lib/core.mjs'",JSON.stringify(new URL('../lib/core.mjs',import.meta.url).href));
     const {default:handler}=await import('data:text/javascript,'+encodeURIComponent(source));
@@ -95,7 +95,7 @@ test('DB 오류 진단은 원문 연결 정보 없이 안전한 코드와 실패
   }};
   try {
     let source=await readFile(new URL('../api/index.mjs',import.meta.url),'utf8');
-    source=source.replace("'../lib/config.mjs'",JSON.stringify(new URL('../lib/config.mjs',import.meta.url).href))
+    source=source.replace("'../lib/keyword-interval.mjs'",JSON.stringify(new URL('../lib/keyword-interval.mjs',import.meta.url).href)).replace("'../lib/config.mjs'",JSON.stringify(new URL('../lib/config.mjs',import.meta.url).href))
       .replace("import {query,setup} from '../lib/db.mjs';","const {query,setup}=globalThis.dbDiagnosticTest;")
       .replace("'../lib/core.mjs'",JSON.stringify(new URL('../lib/core.mjs',import.meta.url).href));
     const {default:handler}=await import('data:text/javascript,'+encodeURIComponent(source));
@@ -176,7 +176,7 @@ test('그래프 Hot topics는 한국 날짜와 항목을 검증하고 최대 10�
   };
   try{
     let source=await readFile(new URL('../api/index.mjs',import.meta.url),'utf8');
-    source=source.replace("'../lib/config.mjs'",JSON.stringify(new URL('../lib/config.mjs',import.meta.url).href))
+    source=source.replace("'../lib/keyword-interval.mjs'",JSON.stringify(new URL('../lib/keyword-interval.mjs',import.meta.url).href)).replace("'../lib/config.mjs'",JSON.stringify(new URL('../lib/config.mjs',import.meta.url).href))
       .replace("import {query,setup} from '../lib/db.mjs';","const {query,setup}=globalThis.hotTopicTest;")
       .replace("'../lib/core.mjs'",JSON.stringify(new URL('../lib/core.mjs',import.meta.url).href));
     const {default:handler}=await import('data:text/javascript,'+encodeURIComponent(source));
@@ -260,4 +260,25 @@ test('외부 전환 변수만으로 기본 예약이 꺼지지 않고 설정 변
     }
   }
   assert.match(workflow,/scheduled:[\s\S]*default: false[\s\S]*type: boolean/);
+});
+
+test('키워드 구간은 실제 완료된 세 수집으로 나누고 실패·진행 중·중복 시각을 제외한다',async()=>{
+  const {collectionIntervals}=await import('../lib/keyword-interval.mjs');
+  const floor='2026-10-26T00:00:00+09:00';
+  const run=(finished_at,status='success')=>({finished_at,status});
+  const t=['2026-10-29T07:04:00+09:00','2026-10-29T08:04:00+09:00','2026-10-29T09:04:00+09:00'];
+  const actual=collectionIntervals([run(t[0]),run(t[2]),run(t[1]),run(t[2]),run('2026-10-29T10:00:00+09:00','failed'),run(null,'running')],floor);
+  assert.deepEqual(actual.current,{startAt:new Date(t[1]).toISOString(),endAt:new Date(t[2]).toISOString(),includeStart:false});
+  assert.deepEqual(actual.previous,{startAt:new Date(t[0]).toISOString(),endAt:new Date(t[1]).toISOString(),includeStart:false});
+  assert.equal(collectionIntervals([],floor).current,null);
+  const first=collectionIntervals([run(t[0])],floor);
+  assert.equal(first.previous,null);assert.equal(first.current.startAt,new Date(floor).toISOString());assert.equal(first.current.includeStart,true);
+  const second=collectionIntervals([run(t[1]),run(t[0])],floor);
+  assert.equal(second.previous.startAt,new Date(floor).toISOString());
+});
+test('이전 상위 목록에 없던 키워드만 신규이며 첫 구간은 전부 신규로 표시하지 않는다',async()=>{
+  const {compareKeywordLists}=await import('../lib/keyword-interval.mjs');
+  const current=[{word:'금리',count:7},{word:'반도체',count:4}],previous=[{word:'금리',count:2}];
+  assert.deepEqual(compareKeywordLists(current,previous,true),[{word:'금리',count:7,isNew:false},{word:'반도체',count:4,isNew:true}]);
+  assert.ok(compareKeywordLists(current,[],false).every(k=>k.isNew===false));
 });

@@ -39,3 +39,8 @@ header #today,header #refresh{font-size:14px;font-weight:700;color:var(--ink)}
 .keyword-metadata span{display:block}
 .keyword-definition{font-size:11px;color:var(--muted);margin-bottom:18px}
 @media(max-width:700px){.keyword-metadata{font-size:9px}.news-meta time{font-size:10px}}
+
+.chip.chip-new{border-color:#d94b4b;background:#fff2f1;color:#ac2929}
+.chip.chip-new small{color:#a64c4c}
+.keyword-new-mark{margin-left:5px;font-size:10px;color:#c43030;font-weight:700}
+.chip.chip-new:hover{background:#ffe5e3;color:#8f2020}

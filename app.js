@@ -91,24 +91,29 @@ function render(){
 
   $('#top-word-label').textContent=state.saved?'저장 위치':'주요 제목 단어';
   $('#top-word').textContent=state.saved?'이 브라우저':d.keywords[0]?.word||'—';
-  $('#top-word-caption').textContent=state.saved?'다른 사람·기기와 공유되지 않음':'현재 필터 기준';
+  $('#top-word-caption').textContent=state.saved?'다른 사람·기기와 공유되지 않음':'최근 수집 구간 기준';
   const complete=d.runs.find(r=>r.finished_at);
-  const scope=d.scope;
-  $('#keyword-period').textContent=scope?.startAt&&scope?.endAt?`집계: ${timestamp(scope.startAt)} ~ ${timestamp(scope.endAt)}`:'집계 기간 확인 중';
-  $('#keyword-asof').textContent=`최근 수집 완료: ${complete?.finished_at?timestamp(complete.finished_at):'이력 없음'} · 한국 시간`;
-  $('#keyword-scope').textContent=scope?`${scope.topic||'전체'} · ${scope.days===0?'전체 기간':scope.days===1?'최근 24시간':`최근 ${scope.days}일`} · ${d.capped?'최신 ':''}${d.articles.length.toLocaleString()}건 분석${scope.search?` · 검색어 “${scope.search}”`:''}`:'';
+  const scope=d.keywordScope;
+  $('#keyword-period').textContent=scope?.current?`집계: ${timestamp(scope.current.startAt)} ~ ${timestamp(scope.current.endAt)} (한국 시간)`:'수집 완료 후 집계됩니다.';
+  $('#keyword-asof').textContent=scope?.previous?`비교: ${timestamp(scope.previous.startAt)} ~ ${timestamp(scope.previous.endAt)}`:'이전 수집 구간이 없어 신규 비교는 다음 수집부터 표시합니다.';
+  $('#keyword-scope').textContent=scope?.current?`${scope.topic||'전체'} · ${(scope.articleCount||0).toLocaleString()}건 분석${scope.search?` · 검색어 “${scope.search}”`:''}`:'';
   $('#last-run').textContent=date(complete?.finished_at,true);
   $('#run-state').textContent=complete?({success:'정상 수집 완료',partial:'일부 수집 실패 · 아래 상태 확인',failed:'수집 실패 · 아래 상태 확인'}[complete.status]||complete.status):'수집 이력이 없습니다.';
   const messages=[];
   if(!a.length&&!state.saved)messages.push(d.coverage.total?'현재 조건에 해당하는 기사가 없습니다. 기간이나 필터를 바꿔보세요.':'아직 수집된 기사가 없습니다. 잠시 후 다시 확인해 주세요.');
-  if(d.capped&&!state.saved)messages.push('조회 범위가 5,000건을 초과해 최신 5,000건만 분석합니다. 기간이나 주제를 좁혀주세요.');
+  if(d.capped&&!state.saved)messages.push('조회 범위가 5,000건을 초과해 기사 목록과 급상승은 최신 5,000건으로 제한합니다. 수집 구간 키워드는 해당 구간 전체를 집계합니다.');
   if(complete&&complete.status!=='success')messages.push('최근 수집에 오류가 있습니다. 페이지 아래 수집 상태를 확인하세요.');
   if(complete&&Date.now()-new Date(complete.finished_at)>12*3600000)messages.push('마지막 수집이 12시간 이상 지났습니다. GitHub Actions 예약 상태를 확인하세요.');
   if(storageWarning)messages.push(storageWarning);
   notify(messages.join(' '));
   const chips=$('#keywords');chips.replaceChildren();
-  d.keywords.forEach(k=>{const b=el('button',undefined,'chip');b.append(el('span',k.word),el('small',`${k.count}건`));b.onclick=()=>keywordSearch(k.word);chips.append(b);});
-  if(!d.keywords.length)chips.append(el('p','분석할 기사가 없습니다.','empty'));
+  d.keywords.forEach(k=>{
+    const b=el('button',undefined,k.isNew?'chip chip-new':'chip');
+    b.append(el('span',k.word));
+    if(k.isNew){b.append(el('span','▲','keyword-new-mark'));b.setAttribute('aria-label',`${k.word} ${k.count}건 · 이전 구간 상위 목록 대비 신규`);b.title='이전 수집 구간의 상위 18개 목록에 새로 진입한 키워드';}
+    b.append(el('small',`${k.count}건`));b.onclick=()=>keywordSearch(k.word);chips.append(b);
+  });
+  if(!d.keywords.length)chips.append(el('p',scope?.current?'이 수집 구간에 분석할 기사가 없습니다.':'수집 완료 후 키워드가 표시됩니다.','empty'));
   const rising=$('#rising');rising.replaceChildren();
   d.rising.forEach(k=>{const b=el('button');b.append(el('span',k.word),el('em',`+${k.change.toFixed(1)}%p`));b.onclick=()=>keywordSearch(k.word);rising.append(b);});
   if(!d.rising.length)rising.append(el('p',d.risingReady?'현재 조건에서 상승 기준에 해당하는 단어가 없습니다.':'수집 이력이 8일 이상 쌓이고 비교 기사가 확보되면 표시합니다.','fine'));

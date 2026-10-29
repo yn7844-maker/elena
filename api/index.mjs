@@ -1,6 +1,7 @@
 import {ARCHIVE_START,trendGroups} from '../lib/config.mjs';
 import {query,setup} from '../lib/db.mjs';
 import {keywords,rising} from '../lib/core.mjs';
+import {collectionIntervals,intervalKeywords,compareKeywordLists} from '../lib/keyword-interval.mjs';
 
 export default async function handler(req,res) {
   res.setHeader('Cache-Control','private, no-store');
@@ -60,11 +61,22 @@ export default async function handler(req,res) {
       query('SELECT * FROM trend_batches ORDER BY fetched_at DESC LIMIT 1'),
       query('SELECT MIN(first_seen) AS first_seen,COUNT(*)::int AS total FROM articles WHERE published_at >= $1::timestamptz',[ARCHIVE_START])
     ]);
+    stage='keyword-intervals-query';
+    const {rows:completedRuns}=await query("SELECT finished_at,status FROM collection_runs WHERE status IN ('success','partial') AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 3");
+    const intervals=collectionIntervals(completedRuns,ARCHIVE_START);
+    stage='keyword-articles-query';
+    const [currentKeywords,previousKeywords]=await Promise.all([
+      intervalKeywords(query,intervals.current,topic,search),
+      intervalKeywords(query,intervals.previous,topic,search)
+    ]);
+    const comparedKeywords=compareKeywordLists(currentKeywords.keywords,previousKeywords.keywords,!!intervals.previous);
     stage='response-build';
     const enough=coverage.first_seen && +new Date(coverage.first_seen)<=now-8*86400000;
     return send(200,{
-      articles:selected.map(({note,saved,...article})=>article),keywords:keywords(selected),rising:enough&&!capped?rising(sample,now):[],
+      articles:selected.map(({note,saved,...article})=>article),keywords:comparedKeywords,rising:enough&&!capped?rising(sample,now):[],
       risingReady:!!enough&&!capped, capped,runs,trends:batches[0]||null,coverage,
+      keywordScope:{...intervals,topic,search,articleCount:currentKeywords.articleCount,previousArticleCount:previousKeywords.articleCount,
+        comparisonReady:!!intervals.previous,comparisonBasis:'previous-top-18',timeBasis:'published_at'},
       topics:Object.fromEntries(['금융','경제','AI','사회','문화','기타'].map(t=>[t,selected.filter(r=>r.topics.includes(t)).length])),
       scope:{days,topic,search,startAt:new Date(Math.max(Date.parse(ARCHIVE_START),days===0?0:now-days*86400000)).toISOString(),endAt:new Date(now).toISOString()},generatedAt:new Date(now).toISOString()
     });
