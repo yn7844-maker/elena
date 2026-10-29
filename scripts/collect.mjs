@@ -6,15 +6,13 @@ import {cleanText,safeUrl,koreaDate} from '../lib/core.mjs';
 import {buildQueryPlan} from '../lib/discovery.mjs';
 
 async function collect() {
-// Check after runner setup, immediately before any DB/API work. Manual runs remain unrestricted.
+// A delayed scheduler must still collect: timing is diagnostic, never a reason to discard work.
 if (process.env.COLLECTION_TRIGGER === 'schedule') {
   const window = collectionWindow();
-  if (!window.allowed) {
-    console.error(`::error::예약 수집 시작 허용 시간을 지났습니다. 현재 한국 시간 ${window.koreaTime}. 한국 시간 07·08·09·10·11·15·18·21시부터 5분 이내만 시작합니다. 이번 회차는 수집하지 않습니다.`);
-    process.exitCode=1;
-    return;
+  if (!window.onTime) {
+    console.warn(`::warning::예약 수집이 지연되었습니다. 현재 한국 시간 ${window.koreaTime}. 수집을 중단하지 않고 계속합니다.`);
   }
-  console.log(`예약 수집 시작: 한국 시간 ${window.koreaTime} (예정 ${window.scheduledAt})`);
+  console.log(`예약 수집 시작: 한국 시간 ${window.koreaTime} (최근 예정 ${window.scheduledAt})`);
 } else {
   console.log('수동 수집 시작: 예약 시간 제한을 적용하지 않습니다.');
 }

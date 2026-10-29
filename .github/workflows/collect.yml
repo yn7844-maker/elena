@@ -2,9 +2,15 @@ name: Collect news
 on:
   schedule:
     # UTC -> 한국 시간 07:00 / 08:00 / 09:00 / 10:00 / 11:00 / 15:00 / 18:00 / 21:00.
-    # GitHub는 정각을 보장하지 않습니다. 5분 넘게 늦은 시작은 수집 전 실패 처리합니다.
+    # GitHub는 정각을 보장하지 않습니다. 지연 시 경고만 남기고 수집은 계속합니다.
     - cron: '0 0,1,2,6,9,12,22,23 * * *'
   workflow_dispatch:
+    inputs:
+      scheduled:
+        description: '외부 예약 호출이면 true. 수동 수집은 false.'
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: read
 concurrency:
@@ -12,6 +18,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   collect:
+    # Switch only after confirming the external cron is working. Manual/external dispatch stays available.
+    if: github.event_name != 'schedule' || vars.COLLECTION_SCHEDULER != 'external'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -22,7 +30,7 @@ jobs:
       - run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
       - run: npm run collect
         env:
-          COLLECTION_TRIGGER: ${{ github.event_name }}
+          COLLECTION_TRIGGER: ${{ (github.event_name == 'schedule' || inputs.scheduled == true) && 'schedule' || github.event_name }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           NAVER_NEWS_CLIENT_ID: ${{ secrets.NAVER_NEWS_CLIENT_ID }}
           NAVER_NEWS_CLIENT_SECRET: ${{ secrets.NAVER_NEWS_CLIENT_SECRET }}

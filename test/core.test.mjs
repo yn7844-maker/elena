@@ -191,29 +191,30 @@ test('예약 수집 시간은 한국 기준 8회이며 UTC 자정과 한국 자�
   assert.deepEqual(COLLECTION_HOURS_KST,[7,8,9,10,11,15,18,21]);
   for(let hour=0;hour<24;hour++){
     const at=`2026-10-29T${String(hour).padStart(2,'0')}:00:00+09:00`;
-    assert.equal(collectionWindow(at).allowed,COLLECTION_HOURS_KST.includes(hour),at);
+    assert.equal(collectionWindow(at).onTime,COLLECTION_HOURS_KST.includes(hour),at);
   }
-  assert.equal(collectionWindow('2026-10-28T22:00:00Z').allowed,true); // 한국 다음날 07시
-  assert.equal(collectionWindow('2026-10-29T00:00:00Z').allowed,true); // 한국 09시
-  assert.equal(collectionWindow('2026-10-29T00:39:00+09:00').allowed,false);
-  assert.equal(collectionWindow('2026-10-29T07:39:00+09:00').allowed,false);
+  assert.equal(collectionWindow('2026-10-28T22:00:00Z').onTime,true); // 한국 다음날 07시
+  assert.equal(collectionWindow('2026-10-29T00:00:00Z').onTime,true); // 한국 09시
+  assert.equal(collectionWindow('2026-10-29T00:39:00+09:00').onTime,false);
+  assert.equal(collectionWindow('2026-10-29T07:39:00+09:00').onTime,false);
 });
-test('예약 시작은 정각부터 5분 이내만 허용하고 직전·초과·잘못된 날짜를 거부한다',async()=>{
+test('예약 지연은 진단용으로 구분하고 최근 예정 시각은 한국 자정을 넘어 계산한다',async()=>{
   const {collectionWindow}=await import('../lib/schedule.mjs');
-  assert.equal(collectionWindow('2026-10-29T06:59:59.999+09:00').allowed,false);
-  assert.equal(collectionWindow('2026-10-29T07:05:00.000+09:00').allowed,true);
-  assert.equal(collectionWindow('2026-10-29T07:05:00.001+09:00').allowed,false);
+  assert.equal(collectionWindow('2026-10-29T06:59:59.999+09:00').onTime,false);
+  assert.equal(collectionWindow('2026-10-29T07:05:00.000+09:00').onTime,true);
+  assert.equal(collectionWindow('2026-10-29T07:05:00.001+09:00').onTime,false);
   assert.equal(collectionWindow('2026-10-29T21:00:00+09:00').scheduledAt,'2026-10-29T12:00:00.000Z');
+  assert.equal(collectionWindow('2026-10-29T00:39:00+09:00').scheduledAt,'2026-10-28T12:00:00.000Z');
   assert.throws(()=>collectionWindow('invalid'),TypeError);
 });
-test('워크플로 시간대와 수집 직전 제한을 함께 적용하고 수동 수집은 허용한다',async()=>{
+test('예약이 00:39까지 지연되어도 수집을 계속하고 수동 수집도 실행한다',async()=>{
   const {readFile}=await import('node:fs/promises');
   const workflow=await readFile(new URL('../.github/workflows/collect.yml',import.meta.url),'utf8');
   const source=await readFile(new URL('../scripts/collect.mjs',import.meta.url),'utf8');
   assert.ok(workflow.includes("cron: '0 0,1,2,6,9,12,22,23 * * *'"));
-  assert.ok(workflow.includes('COLLECTION_TRIGGER: ${{ github.event_name }}'));
+  assert.ok(workflow.includes("COLLECTION_TRIGGER: ${{ (github.event_name == 'schedule' || inputs.scheduled == true) && 'schedule' || github.event_name }}"));
   const {collectionWindow}=await import('../lib/schedule.mjs');
-  // Run the collector against fakes: a delayed scheduled attempt must not touch DB/API.
+  // Run the real collector entry against a fake DB: a late reservation must reach setup.
   const code=source.replace(/^import .*;\n/gm,'').replace(/collect\(\)\.catch[\s\S]*$/,'export {collect};');
   const originalTrigger=process.env.COLLECTION_TRIGGER,originalExit=process.exitCode;
   let databaseCalls=0,windowCalls=0;
@@ -224,12 +225,34 @@ test('워크플로 시간대와 수집 직전 제한을 함께 적용하고 수�
   try{
     const {collect}=await import('data:text/javascript,'+encodeURIComponent('const {collectionWindow,setup}=globalThis.scheduleCheck;\n'+code));
     process.env.COLLECTION_TRIGGER='schedule';
-    await collect();assert.equal(process.exitCode,1);assert.equal(databaseCalls,0);
+    await assert.rejects(collect(),/manual reached DB/);
+    assert.equal(process.exitCode,originalExit);assert.equal(databaseCalls,1);
     process.env.COLLECTION_TRIGGER='workflow_dispatch';
     await assert.rejects(collect(),/manual reached DB/);
-    assert.equal(databaseCalls,1);assert.equal(windowCalls,1);
+    assert.equal(databaseCalls,2);assert.equal(windowCalls,1);
   }finally{
     if(originalTrigger===undefined)delete process.env.COLLECTION_TRIGGER;else process.env.COLLECTION_TRIGGER=originalTrigger;
     process.exitCode=originalExit;delete globalThis.scheduleCheck;
   }
+});
+
+
+test('외부 예약도 지연 진단을 적용하며 전환 변수는 GitHub 자체 예약만 끈다',async()=>{
+  const {readFile}=await import('node:fs/promises');
+  const workflow=await readFile(new URL('../.github/workflows/collect.yml',import.meta.url),'utf8');
+  const condition=workflow.match(/    if: (.+)/)[1];
+  const trigger=workflow.match(/COLLECTION_TRIGGER: \$\{\{ (.+) \}\}/)[1];
+  const jobAllowed=Function('github','vars',`return (${condition})`);
+  const collectionTrigger=Function('github','inputs',`return (${trigger})`);
+  for(const scheduler of ['', 'external']){
+    for(const event of ['schedule','workflow_dispatch']){
+      assert.equal(jobAllowed({event_name:event},{COLLECTION_SCHEDULER:scheduler}),
+        !(scheduler==='external'&&event==='schedule'));
+      for(const scheduled of [true,false]){
+        assert.equal(collectionTrigger({event_name:event},{scheduled}),
+          event==='schedule'||scheduled?'schedule':'workflow_dispatch');
+      }
+    }
+  }
+  assert.match(workflow,/scheduled:[\s\S]*default: false[\s\S]*type: boolean/);
 });
