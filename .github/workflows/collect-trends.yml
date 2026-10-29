@@ -1,0 +1,28 @@
+name: Refresh search trends
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'lib/trends.mjs'
+      - 'scripts/collect-trends.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: news-collection
+  cancel-in-progress: false
+jobs:
+  trends:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+      - run: node scripts/collect-trends.mjs
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          NAVER_TREND_CLIENT_ID: ${{ secrets.NAVER_TREND_CLIENT_ID }}
+          NAVER_TREND_CLIENT_SECRET: ${{ secrets.NAVER_TREND_CLIENT_SECRET }}

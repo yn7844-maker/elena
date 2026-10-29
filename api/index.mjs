@@ -1,3 +1,4 @@
+import {TREND_UNITS,trendPeriodBounds,storedTrends} from '../lib/trends.mjs';
 import {ARCHIVE_START,trendGroups} from '../lib/config.mjs';
 import {query,setup} from '../lib/db.mjs';
 import {keywords,rising} from '../lib/core.mjs';
@@ -11,19 +12,27 @@ export default async function handler(req,res) {
     res.setHeader('Allow','GET');
     return send(405,{error:'개인 메모와 즐겨찾기는 브라우저에 저장됩니다. 서버 수정 기능은 제공하지 않습니다.'});
   }
-  if(!['dashboard','hot-topics'].includes(route))return send(404,{error:'없는 경로'});
+  if(!['dashboard','hot-topics','trends'].includes(route))return send(404,{error:'없는 경로'});
   // 기존 세션 쿠키는 더 이상 사용하지 않습니다.
   if(String(req.headers.cookie||'').includes('elena_session='))
     res.setHeader('Set-Cookie','elena_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0');
   let stage='request';
   try {
+    if(route==='trends'){
+      const params=new URL(req.url,'https://local').searchParams;
+      const unit=params.get('unit')||'date',batchId=params.get('batch')||'';
+      if(!TREND_UNITS.includes(unit)||(batchId&&!/^[1-9]\d{0,17}$/.test(batchId)))return send(400,{error:'검색 관심도의 기간 단위 또는 수집 시점을 확인하세요.'});
+      stage='database-setup';await setup();stage='trends-query';
+      const data=await storedTrends(query,unit,batchId);
+      if(batchId&&!data.batch)return send(404,{error:'해당 수집 이력이 없거나 보관 기간이 지났습니다.'});
+      return send(200,data);
+    }
     if(route==='hot-topics'){
       const params=new URL(req.url,'https://local').searchParams;
       const date=params.get('date')||'',group=trendGroups.find(g=>g.groupName===params.get('group'));
-      const day=new Date(date+'T00:00:00Z');
-      if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(day.getTime())||day.toISOString().slice(0,10)!==date||!group)
-        return send(400,{error:'조회할 날짜와 검색 관심도 항목을 확인하세요.'});
-      const start=new Date(date+'T00:00:00+09:00'),end=new Date(start.getTime()+86400000);
+      const unit=params.get('unit')||'date',bounds=trendPeriodBounds(date,unit);
+      if(!bounds||!group)return send(400,{error:'조회할 날짜와 검색 관심도 항목을 확인하세요.'});
+      const {start,end}=bounds;
       if(end.getTime()<=Date.parse(ARCHIVE_START))
         return send(200,{date,group:group.groupName,topics:[],articleCount:0,capped:false,message:'이 날짜는 아카이브 수집 시작일 이전입니다.'});
       stage='database-setup';await setup();
@@ -58,7 +67,7 @@ export default async function handler(req,res) {
     stage='metadata-query';
     const [{rows:runs},{rows:batches},{rows:[coverage]}]=await Promise.all([
       query('SELECT * FROM collection_runs ORDER BY started_at DESC LIMIT 5'),
-      query('SELECT * FROM trend_batches ORDER BY fetched_at DESC LIMIT 1'),
+      query("SELECT * FROM trend_batches WHERE time_unit='date' ORDER BY fetched_at DESC LIMIT 1"),
       query('SELECT MIN(first_seen) AS first_seen,COUNT(*)::int AS total FROM articles WHERE published_at >= $1::timestamptz',[ARCHIVE_START])
     ]);
     stage='keyword-intervals-query';

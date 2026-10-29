@@ -63,7 +63,7 @@ test('대시보드는 공개 조회 전용이며 기존 쿠키로도 공유 메�
   };
   try{
     let source=await readFile(new URL('../api/index.mjs',import.meta.url),'utf8');
-    source=source.replace("'../lib/keyword-interval.mjs'",JSON.stringify(new URL('../lib/keyword-interval.mjs',import.meta.url).href)).replace("'../lib/config.mjs'",JSON.stringify(new URL('../lib/config.mjs',import.meta.url).href))
+    source=source.replace("'../lib/trends.mjs'",JSON.stringify(new URL('../lib/trends.mjs',import.meta.url).href)).replace("'../lib/keyword-interval.mjs'",JSON.stringify(new URL('../lib/keyword-interval.mjs',import.meta.url).href)).replace("'../lib/config.mjs'",JSON.stringify(new URL('../lib/config.mjs',import.meta.url).href))
       .replace("import {query,setup} from '../lib/db.mjs';","const {query,setup}=globalThis.personalApiTest;")
       .replace("'../lib/core.mjs'",JSON.stringify(new URL('../lib/core.mjs',import.meta.url).href));
     const {default:handler}=await import('data:text/javascript,'+encodeURIComponent(source));
@@ -95,7 +95,7 @@ test('DB 오류 진단은 원문 연결 정보 없이 안전한 코드와 실패
   }};
   try {
     let source=await readFile(new URL('../api/index.mjs',import.meta.url),'utf8');
-    source=source.replace("'../lib/keyword-interval.mjs'",JSON.stringify(new URL('../lib/keyword-interval.mjs',import.meta.url).href)).replace("'../lib/config.mjs'",JSON.stringify(new URL('../lib/config.mjs',import.meta.url).href))
+    source=source.replace("'../lib/trends.mjs'",JSON.stringify(new URL('../lib/trends.mjs',import.meta.url).href)).replace("'../lib/keyword-interval.mjs'",JSON.stringify(new URL('../lib/keyword-interval.mjs',import.meta.url).href)).replace("'../lib/config.mjs'",JSON.stringify(new URL('../lib/config.mjs',import.meta.url).href))
       .replace("import {query,setup} from '../lib/db.mjs';","const {query,setup}=globalThis.dbDiagnosticTest;")
       .replace("'../lib/core.mjs'",JSON.stringify(new URL('../lib/core.mjs',import.meta.url).href));
     const {default:handler}=await import('data:text/javascript,'+encodeURIComponent(source));
@@ -176,7 +176,7 @@ test('그래프 Hot topics는 한국 날짜와 항목을 검증하고 최대 10�
   };
   try{
     let source=await readFile(new URL('../api/index.mjs',import.meta.url),'utf8');
-    source=source.replace("'../lib/keyword-interval.mjs'",JSON.stringify(new URL('../lib/keyword-interval.mjs',import.meta.url).href)).replace("'../lib/config.mjs'",JSON.stringify(new URL('../lib/config.mjs',import.meta.url).href))
+    source=source.replace("'../lib/trends.mjs'",JSON.stringify(new URL('../lib/trends.mjs',import.meta.url).href)).replace("'../lib/keyword-interval.mjs'",JSON.stringify(new URL('../lib/keyword-interval.mjs',import.meta.url).href)).replace("'../lib/config.mjs'",JSON.stringify(new URL('../lib/config.mjs',import.meta.url).href))
       .replace("import {query,setup} from '../lib/db.mjs';","const {query,setup}=globalThis.hotTopicTest;")
       .replace("'../lib/core.mjs'",JSON.stringify(new URL('../lib/core.mjs',import.meta.url).href));
     const {default:handler}=await import('data:text/javascript,'+encodeURIComponent(source));
@@ -281,4 +281,41 @@ test('이전 상위 목록에 없던 키워드만 신규이며 첫 구간은 전
   const current=[{word:'금리',count:7},{word:'반도체',count:4}],previous=[{word:'금리',count:2}];
   assert.deepEqual(compareKeywordLists(current,previous,true),[{word:'금리',count:7,isNew:false},{word:'반도체',count:4,isNew:true}]);
   assert.ok(compareKeywordLists(current,[],false).every(k=>k.isNew===false));
+});
+
+test('검색 트렌드는 한국 날짜 기준 완료된 30일·12주·12개월만 요청한다',async()=>{
+  const {trendRequestPlans,trendPeriodBounds}=await import('../lib/trends.mjs');
+  const plans=trendRequestPlans('2026-10-29T00:30:00Z');
+  assert.deepEqual(plans,[
+    {timeUnit:'date',startDate:'2026-09-29',endDate:'2026-10-28'},
+    {timeUnit:'week',startDate:'2026-08-03',endDate:'2026-10-25'},
+    {timeUnit:'month',startDate:'2025-10-01',endDate:'2026-09-30'}
+  ]);
+  assert.equal(trendRequestPlans('2026-11-01T14:59:59Z')[1].endDate,'2026-10-25'); // Sunday not complete
+  assert.equal(trendRequestPlans('2026-11-01T15:00:00Z')[1].endDate,'2026-11-01'); // Korea Monday
+  assert.equal(trendRequestPlans('2026-10-31T15:00:00Z')[2].endDate,'2026-10-31');
+  assert.equal(trendPeriodBounds('2024-02-01','month').end.toISOString(),'2024-02-29T15:00:00.000Z');
+  assert.equal(trendPeriodBounds('2026-10-26','week').end.toISOString(),'2026-11-01T15:00:00.000Z');
+  assert.equal(trendPeriodBounds('2026-02-30','date'),null);assert.equal(trendPeriodBounds('2026-10-29','hour'),null);
+});
+test('주별·월별은 완료된 범위가 바뀔 때만 추가 호출하고 하루 중 재수집은 일별만 호출한다',async()=>{
+  const {collectTrends}=await import('../lib/trends.mjs');
+  const cache=new Set();let calls=[];
+  const query=async(sql,args)=>{
+    if(sql.startsWith('SELECT id'))return {rows:cache.has(args.join('|'))?[{id:1}]:[]};
+    if(sql.startsWith('INSERT')){const data=JSON.parse(args[0]);cache.add([data.timeUnit,data.startDate,data.endDate].join('|'));}
+    return {rows:[]};
+  };
+  const options={query,keywordGroups:[],request:async body=>{calls.push(body.timeUnit);return {...body,results:[]};},now:'2026-10-29T00:00:00Z'};
+  const first=await collectTrends(options);assert.deepEqual(calls,['date','week','month']);assert.deepEqual(first.errors,[]);
+  calls=[];assert.equal((await collectTrends({...options,now:'2026-10-29T03:00:00Z'})).calls,1);assert.deepEqual(calls,['date']);
+  calls=[];await collectTrends({...options,now:'2026-11-02T00:00:00Z'});assert.deepEqual(calls,['date','week','month']);
+});
+test('한 트렌드 단위가 실패해도 나머지 단위는 저장을 시도한다',async()=>{
+  const {collectTrends}=await import('../lib/trends.mjs');let stored=[];
+  const result=await collectTrends({query:async(sql,args)=>{if(sql.startsWith('INSERT'))stored.push(args[1]);return {rows:[]};},
+    keywordGroups:[],now:'2026-10-29T00:00:00Z',request:async body=>{
+      if(body.timeUnit==='week')throw new Error('temporary failure');return {...body,results:[]};
+    }});
+  assert.deepEqual(stored,['date','month']);assert.equal(result.calls,3);assert.equal(result.errors.length,1);
 });

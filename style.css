@@ -50,3 +50,15 @@ header #today,header #refresh{font-size:14px;font-weight:700;color:var(--ink)}
 .keyword-scope-toggle .keyword-metadata{margin-top:8px}
 .keyword-scope-toggle .keyword-definition{font-size:10px;margin:5px 0 0;max-width:400px;overflow-wrap:anywhere}
 .keyword-help{font-size:12px;color:var(--muted);margin:0 0 18px}
+
+.trend-heading{margin-bottom:14px}
+.trend-heading h2{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
+.trend-heading small{font-size:10px;font-weight:400;color:var(--muted);letter-spacing:0}
+.trend-controls{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+#trend-units{display:flex;gap:4px;flex-shrink:0}
+#trend-units button{padding:5px 12px;border:1px solid var(--line);border-radius:5px;font-size:12px}
+#trend-units button.active{background:var(--green);border-color:var(--green);color:#fff}
+.trend-controls label{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px;min-width:0;max-width:100%}
+#trend-snapshot{font-size:11px;padding:5px 8px;min-width:0;max-width:225px}
+.trend-history-note{font-size:10px;color:var(--muted);margin-bottom:12px}
+@media(max-width:700px){.trend-controls label{width:100%}#trend-snapshot{flex:1;max-width:none}}

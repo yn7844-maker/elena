@@ -1,6 +1,8 @@
 import {createPersonalStore,PERSONAL_STORAGE_KEY} from './personal-store.js';
 const $ = s => document.querySelector(s);
 const state = {topic:'',saved:false,days:7,search:'',page:1,data:null};
+const trendState={unit:'date',batchId:'',data:null,loading:false,error:'',request:0};
+const trendLabels={date:'일별',week:'주별',month:'월별'};
 const colors=['#315e50','#9aaf62','#c28b55','#7e8bb0','#bc7e8c'];
 let requestNumber=0;
 const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
@@ -63,7 +65,7 @@ async function load(){
   finally{if(serial===requestNumber)$('#refresh').disabled=false;}
 }
 $('#today').textContent=new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',year:'numeric',month:'long',day:'numeric'}).format(new Date());
-$('#refresh').onclick=load;
+$('#refresh').onclick=()=>{load();if(!state.saved)loadTrend();};
 function chooseTopic(event){
   const button=event.target.closest('button[data-topic]');
   if(!button)return;
@@ -119,7 +121,7 @@ function render(){
   if(!d.rising.length)rising.append(el('p',d.risingReady?'현재 조건에서 상승 기준에 해당하는 단어가 없습니다.':'수집 이력이 8일 이상 쌓이고 비교 기사가 확보되면 표시합니다.','fine'));
   $('#list-title').textContent=state.saved?'저장한 이야기':'오늘의 발견';
   $('#scope-label').textContent=`${state.topic||'전체'} · 최신순 · ${state.days===0?'전체 기간':'최근 '+(state.days===1?'24시간':state.days+'일')} · ${a.length.toLocaleString()}건`;
-  renderArticles();renderTrend(d.trends);
+  renderArticles();renderTrend(trendState.data?.unit===trendState.unit?trendState.data.batch:trendState.unit==='date'&&!trendState.batchId?d.trends:null);
   const runs=$('#runs');runs.replaceChildren();
   d.runs.forEach(r=>{const item=el('div',`${date(r.started_at,true)} · ${r.status} · ${r.fetched}건 처리`,'run-row');(r.errors||[]).forEach(error=>item.append(el('div',error,'error')));
     if(r.search_plan&&Object.keys(r.search_plan).length){
@@ -169,13 +171,45 @@ function detail(a){
 const hotTopicCache=new Map();
 let dismissTrendPopup=()=>{};
 document.addEventListener('pointerdown',event=>{if(!$('#trend-chart').contains(event.target))dismissTrendPopup();});
+$('#trend-units').onclick=event=>{
+  const button=event.target.closest('button[data-unit]');
+  if(!button||button.dataset.unit===trendState.unit)return;
+  trendState.unit=button.dataset.unit;trendState.batchId='';loadTrend();
+};
+$('#trend-snapshot').onchange=event=>{trendState.batchId=event.target.value;loadTrend();};
+function renderTrendControls(){
+  document.querySelectorAll('#trend-units button').forEach(button=>{
+    const active=button.dataset.unit===trendState.unit;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));
+  });
+  const select=$('#trend-snapshot'),snapshots=trendState.data?.unit===trendState.unit?trendState.data.snapshots:[];
+  select.replaceChildren();const latest=el('option','최신 수집');latest.value='';select.append(latest);
+  for(const snapshot of snapshots||[]){const option=el('option',timestamp(snapshot.fetched_at)+' (한국 시간)');option.value=String(snapshot.id);select.append(option);}
+  if(trendState.batchId&&![...select.options].some(o=>o.value===trendState.batchId)){const missing=el('option','선택한 수집 이력');missing.value=trendState.batchId;select.append(missing);}
+  select.value=trendState.batchId;select.disabled=trendState.loading;
+}
+async function loadTrend(){
+  const serial=++trendState.request,unit=trendState.unit,batchId=trendState.batchId;
+  trendState.loading=true;trendState.error='';renderTrend(null);
+  try{
+    const data=await api('trends&'+new URLSearchParams({unit,batch:batchId}));
+    if(serial!==trendState.request)return;
+    trendState.data=data;
+  }catch(error){if(serial!==trendState.request)return;trendState.error=error.message;trendState.data=null;}
+  finally{if(serial===trendState.request){trendState.loading=false;renderTrend(trendState.data?.batch);}}
+}
 function renderTrend(batch){
+  renderTrendControls();
   dismissTrendPopup();
   const chart=$('#trend-chart'),legend=$('#trend-legend'),table=$('#trend-table');chart.replaceChildren();legend.replaceChildren();table.replaceChildren();
-  if(!batch?.payload?.results?.length){chart.append(el('div','검색어 트렌드 수집 결과가 아직 없습니다.','empty'));$('#trend-info').textContent='트렌드 API 인증 정보와 수집 실행 결과를 확인하세요.';return;}
+  if(trendState.loading||trendState.error||!batch?.payload?.results?.length){
+    const message=trendState.loading?'검색 관심도를 불러오는 중입니다.':trendState.error||`${trendLabels[trendState.unit]} 검색 관심도 수집 결과가 아직 없습니다.`;
+    chart.append(el('div',message,'empty'));
+    $('#trend-info').textContent=trendState.loading?'':trendState.error?'수집 시점을 다시 선택하거나 새로고침해 주세요.':'새로운 기간 단위의 데이터는 다음 수집이 완료되면 표시됩니다.';
+    return;
+  }
   const points=[];
   const data=batch.payload,groups=data.results,dates=[...new Set(groups.flatMap(g=>g.data.map(p=>p.period)))].sort();
-  const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 520 210');svg.setAttribute('role','img');svg.setAttribute('aria-label','최근 30일 검색 관심도. 상세 값은 아래 날짜별 표에서 확인할 수 있습니다.');
+  const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 520 210');svg.setAttribute('role','img');svg.setAttribute('aria-label',`${trendLabels[trendState.unit]} 검색 관심도. 상세 값은 아래 기간별 표에서 확인할 수 있습니다.`);
   const add=(tag,attrs,text)=>{const n=document.createElementNS(ns,tag);for(const [k,v]of Object.entries(attrs))n.setAttribute(k,v);if(text!==undefined)n.textContent=text;svg.append(n);return n;};
   [0,25,50,75,100].forEach(n=>{const y=175-n*1.5;add('line',{x1:32,x2:505,y1:y,y2:y,stroke:'#e8ede7','stroke-dasharray':'3 4'});add('text',{x:2,y:y+4,fill:'#87918b','font-size':10},n);});
   groups.forEach((g,i)=>{
@@ -184,16 +218,16 @@ function renderTrend(batch){
     add('path',{d:path,fill:'none',stroke:colors[i%5],'stroke-width':2});
     const l=el('span'),dot=el('i');dot.style.backgroundColor=colors[i%5];l.append(dot,document.createTextNode(g.title));legend.append(l);
   });
-  if(dates.length){add('text',{x:32,y:198,fill:'#87918b','font-size':10},dates[0].slice(5));add('text',{x:470,y:198,fill:'#87918b','font-size':10},dates.at(-1).slice(5));}chart.append(svg);attachTrendTopics(chart,svg,dates,groups,points);
-  $('#trend-info').textContent=`${data.startDate} ~ ${data.endDate} · ${date(batch.fetched_at,true)} 갱신. 동일 요청 내 최대 검색량을 100으로 한 상대 지수이며 실제 검색 횟수가 아닙니다. 위 기사 필터와 별도로 고정 5개 그룹을 비교합니다.`;
-  const t=el('table'),head=el('tr');['날짜',...groups.map(g=>g.title)].forEach(x=>head.append(el('th',x)));t.append(head);
+  if(dates.length){add('text',{x:32,y:198,fill:'#87918b','font-size':10},dates[0].slice(5));add('text',{x:470,y:198,fill:'#87918b','font-size':10},dates.at(-1).slice(5));}chart.append(svg);attachTrendTopics(chart,svg,dates,groups,points,data.timeUnit||'date');
+  $('#trend-info').textContent=`${trendLabels[data.timeUnit||'date']} · ${data.startDate} ~ ${data.endDate} · ${timestamp(batch.fetched_at)} 수집 (한국 시간). 동일 요청 내 최대 검색량을 100으로 한 상대 지수이며 실제 검색 횟수가 아닙니다. 위 기사 필터와 별도로 고정 5개 그룹을 비교합니다.`;
+  const t=el('table'),head=el('tr');['기간 시작일',...groups.map(g=>g.title)].forEach(x=>head.append(el('th',x)));t.append(head);
   dates.forEach(d=>{const row=el('tr');row.append(el('td',d));groups.forEach(g=>{const n=g.data.find(p=>p.period===d)?.ratio;row.append(el('td',n==null?'—':Number(n).toFixed(1)));});t.append(row);});table.append(t);
 }
 window.addEventListener('storage',event=>{
   if(event.key===PERSONAL_STORAGE_KEY||event.key===null){readPersonal();if(state.data||state.saved)render();}
 });
 
-function attachTrendTopics(chart,svg,dates,groups,points){
+function attachTrendTopics(chart,svg,dates,groups,points,unit='date'){
   if(!points.length)return;
   const popup=el('div',undefined,'trend-tooltip');popup.hidden=true;popup.setAttribute('role','status');popup.setAttribute('aria-live','polite');chart.append(popup);
   svg.setAttribute('tabindex','0');
@@ -218,7 +252,7 @@ function attachTrendTopics(chart,svg,dates,groups,points){
   }
   function content(point,data,error){
     popup.replaceChildren();
-    popup.append(el('strong',point.group+' · '+point.date),el('div','검색 관심도 '+Number(point.ratio).toFixed(1),'trend-tooltip-ratio'),el('h3','Hot topics · 최대 10개'));
+    popup.append(el('strong',point.group+' · '+point.date+' · '+trendLabels[unit]),el('div','검색 관심도 '+Number(point.ratio).toFixed(1),'trend-tooltip-ratio'),el('h3','Hot topics · 최대 10개'));
     if(error)popup.append(el('p','관련 키워드를 불러오지 못했습니다. 잠시 후 다시 확인하세요.','fine'));
     else if(!data)popup.append(el('p','관련 기사를 확인하고 있습니다.','fine'));
     else if(!data.topics.length)popup.append(el('p',data.message||'해당 날짜에 수집된 관련 기사가 없습니다.','fine'));
@@ -231,7 +265,7 @@ function attachTrendTopics(chart,svg,dates,groups,points){
   }
   function show(point){
     clearTimeout(hideTimer);
-    const key=point.date+'|'+point.group;
+    const key=unit+'|'+point.date+'|'+point.group;
     if(key===activeKey&&!popup.hidden)return;
     current=point;activeKey=key;const version=++generation;clearTimeout(timer);
     guide.setAttribute('x1',point.x);guide.setAttribute('x2',point.x);guide.removeAttribute('visibility');
@@ -242,7 +276,7 @@ function attachTrendTopics(chart,svg,dates,groups,points){
     content(point);
     timer=setTimeout(async()=>{
       try{
-        const data=await api('hot-topics&'+new URLSearchParams({date:point.date,group:point.group}));
+        const data=await api('hot-topics&'+new URLSearchParams({date:point.date,group:point.group,unit}));
         hotTopicCache.set(key,{at:Date.now(),data});
         if(hotTopicCache.size>200)hotTopicCache.delete(hotTopicCache.keys().next().value);
         if(version===generation&&!popup.hidden)content(point,data);
@@ -275,3 +309,4 @@ function attachTrendTopics(chart,svg,dates,groups,points){
 }
 
 load();
+loadTrend();

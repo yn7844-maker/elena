@@ -1,8 +1,9 @@
 import {collectionWindow} from '../lib/schedule.mjs';
+import {collectTrends} from '../lib/trends.mjs';
 import {query,setup,close} from '../lib/db.mjs';
 import {trendGroups,collectionCutoff,ARCHIVE_START,collectionPolicy} from '../lib/config.mjs';
 import {naver} from '../lib/naver.mjs';
-import {cleanText,safeUrl,koreaDate} from '../lib/core.mjs';
+import {cleanText,safeUrl} from '../lib/core.mjs';
 import {buildQueryPlan} from '../lib/discovery.mjs';
 
 async function collect() {
@@ -106,15 +107,10 @@ try {
     }
   }
   try {
-    // 미완료인 오늘을 제외. 동일 요청의 5개 그룹을 함께 저장하여 정규화 기준 보존.
     console.log('검색어 트렌드 수집 시작');
-    const end = Date.now()-86400000;
-    const data = await naver('/search-trend/v1/search','TREND',{
-      startDate:koreaDate(end-29*86400000),endDate:koreaDate(end),timeUnit:'date',keywordGroups:trendGroups
-    });
-    if (!Array.isArray(data.results)) throw new Error('트렌드 응답 형식 오류');
-    await query('INSERT INTO trend_batches(payload) VALUES($1::jsonb)',[JSON.stringify(data)]);
-    await query("DELETE FROM trend_batches WHERE fetched_at < NOW()-INTERVAL '90 days'");
+    const result=await collectTrends({query,keywordGroups:trendGroups,request:body=>naver('/search-trend/v1/search','TREND',body)});
+    errors.push(...result.errors);
+    console.log(`트렌드 논리 요청 ${result.calls}회 (일별 매회, 주별·월별은 완료 구간 변경 시)`);
   } catch(e) { errors.push(`트렌드: ${e.message}`); }
   await query("UPDATE collection_runs SET finished_at=NOW(),status=$2,fetched=$3,errors=$4::jsonb WHERE id=$1",[run.id,errors.length?(fetched?'partial':'failed'):'success',fetched,JSON.stringify([...errors,...warnings])]);
   console.log(JSON.stringify({status:errors.length?'partial':'success',processed:fetched,newsCalls,elapsedSeconds:Math.round((Date.now()-started)/1000),errors,warnings}));
