@@ -184,3 +184,52 @@ test('그래프 Hot topics는 한국 날짜와 항목을 검증하고 최대 10�
     assert.equal((await invoke('2026-10-26','없는항목')).code,400);assert.equal(calls,1);
   }finally{delete globalThis.hotTopicTest;}
 });
+
+
+test('예약 수집 시간은 한국 기준 8회이며 UTC 자정과 한국 자정을 구분한다',async()=>{
+  const {collectionWindow,COLLECTION_HOURS_KST}=await import('../lib/schedule.mjs');
+  assert.deepEqual(COLLECTION_HOURS_KST,[7,8,9,10,11,15,18,21]);
+  for(let hour=0;hour<24;hour++){
+    const at=`2026-10-29T${String(hour).padStart(2,'0')}:00:00+09:00`;
+    assert.equal(collectionWindow(at).allowed,COLLECTION_HOURS_KST.includes(hour),at);
+  }
+  assert.equal(collectionWindow('2026-10-28T22:00:00Z').allowed,true); // 한국 다음날 07시
+  assert.equal(collectionWindow('2026-10-29T00:00:00Z').allowed,true); // 한국 09시
+  assert.equal(collectionWindow('2026-10-29T00:39:00+09:00').allowed,false);
+  assert.equal(collectionWindow('2026-10-29T07:39:00+09:00').allowed,false);
+});
+test('예약 시작은 정각부터 5분 이내만 허용하고 직전·초과·잘못된 날짜를 거부한다',async()=>{
+  const {collectionWindow}=await import('../lib/schedule.mjs');
+  assert.equal(collectionWindow('2026-10-29T06:59:59.999+09:00').allowed,false);
+  assert.equal(collectionWindow('2026-10-29T07:05:00.000+09:00').allowed,true);
+  assert.equal(collectionWindow('2026-10-29T07:05:00.001+09:00').allowed,false);
+  assert.equal(collectionWindow('2026-10-29T21:00:00+09:00').scheduledAt,'2026-10-29T12:00:00.000Z');
+  assert.throws(()=>collectionWindow('invalid'),TypeError);
+});
+test('워크플로 시간대와 수집 직전 제한을 함께 적용하고 수동 수집은 허용한다',async()=>{
+  const {readFile}=await import('node:fs/promises');
+  const workflow=await readFile(new URL('../.github/workflows/collect.yml',import.meta.url),'utf8');
+  const source=await readFile(new URL('../scripts/collect.mjs',import.meta.url),'utf8');
+  assert.ok(workflow.includes("cron: '0 0,1,2,6,9,12,22,23 * * *'"));
+  assert.ok(workflow.includes('COLLECTION_TRIGGER: ${{ github.event_name }}'));
+  const {collectionWindow}=await import('../lib/schedule.mjs');
+  // Run the collector against fakes: a delayed scheduled attempt must not touch DB/API.
+  const code=source.replace(/^import .*;\n/gm,'').replace(/collect\(\)\.catch[\s\S]*$/,'export {collect};');
+  const originalTrigger=process.env.COLLECTION_TRIGGER,originalExit=process.exitCode;
+  let databaseCalls=0,windowCalls=0;
+  globalThis.scheduleCheck={
+    collectionWindow:()=>{windowCalls++;return collectionWindow('2026-10-29T00:39:00+09:00');},
+    setup:async()=>{databaseCalls++;throw new Error('manual reached DB');}
+  };
+  try{
+    const {collect}=await import('data:text/javascript,'+encodeURIComponent('const {collectionWindow,setup}=globalThis.scheduleCheck;\n'+code));
+    process.env.COLLECTION_TRIGGER='schedule';
+    await collect();assert.equal(process.exitCode,1);assert.equal(databaseCalls,0);
+    process.env.COLLECTION_TRIGGER='workflow_dispatch';
+    await assert.rejects(collect(),/manual reached DB/);
+    assert.equal(databaseCalls,1);assert.equal(windowCalls,1);
+  }finally{
+    if(originalTrigger===undefined)delete process.env.COLLECTION_TRIGGER;else process.env.COLLECTION_TRIGGER=originalTrigger;
+    process.exitCode=originalExit;delete globalThis.scheduleCheck;
+  }
+});
