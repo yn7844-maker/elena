@@ -74,6 +74,14 @@ test('대시보드는 공개 조회 전용이며 기존 쿠키로도 공유 메�
     let res=await invoke('dashboard');assert.equal(res.code,200);
     assert.equal('note' in res.body.articles[0],false);assert.equal('saved' in res.body.articles[0],false);
     assert.match(res.headers['Set-Cookie'],/Max-Age=0/);
+    const archive=Date.parse('2026-10-26T00:00:00+09:00');
+    for(const days of [0,1,7,30,90]){
+      const scoped=await invoke(`dashboard&days=${days}&topic=금융`);
+      const end=Date.parse(scoped.body.generatedAt);
+      assert.equal(scoped.body.scope.startAt,new Date(Math.max(archive,days===0?0:end-days*86400000)).toISOString());
+      assert.equal(scoped.body.scope.endAt,scoped.body.generatedAt);
+      assert.equal(scoped.body.scope.topic,'금융');
+    }
     assert.equal((await invoke('article','PATCH')).code,405);
     assert.equal((await invoke('login','POST')).code,405);
     assert.equal((await invoke('login')).code,404);assert.equal(writes,0);

@@ -66,7 +66,7 @@ export default async function handler(req,res) {
       articles:selected.map(({note,saved,...article})=>article),keywords:keywords(selected),rising:enough&&!capped?rising(sample,now):[],
       risingReady:!!enough&&!capped, capped,runs,trends:batches[0]||null,coverage,
       topics:Object.fromEntries(['금융','경제','AI','사회','문화','기타'].map(t=>[t,selected.filter(r=>r.topics.includes(t)).length])),
-      scope:{days,topic,search},generatedAt:new Date(now).toISOString()
+      scope:{days,topic,search,startAt:new Date(Math.max(Date.parse(ARCHIVE_START),days===0?0:now-days*86400000)).toISOString(),endAt:new Date(now).toISOString()},generatedAt:new Date(now).toISOString()
     });
   } catch (error) {
     // 공개 응답/로그에는 DB 주소, 사용자명, 비밀번호, SQL 내용, 원문 오류를 출력하지 않습니다.

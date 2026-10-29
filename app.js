@@ -5,6 +5,17 @@ const colors=['#315e50','#9aaf62','#c28b55','#7e8bb0','#bc7e8c'];
 let requestNumber=0;
 const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
 const date=(v,full=false)=>v?new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'numeric',day:'numeric',...(full?{hour:'2-digit',minute:'2-digit'}:{})}).format(new Date(v)):'—';
+const timestamp=v=>{
+  if(!v||!Number.isFinite(new Date(v).getTime()))return '시각 정보 없음';
+  const parts=Object.fromEntries(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(v)).map(p=>[p.type,p.value]));
+  return `${parts.year}.${parts.month}.${parts.day} ${parts.hour}:${parts.minute}`;
+};
+function publishedTime(value){
+  const time=el('time',`기사 게시 ${timestamp(value)} (한국 시간)`);
+  if(value&&Number.isFinite(new Date(value).getTime()))time.dateTime=new Date(value).toISOString();
+  time.title='네이버가 제공한 기사 발행 시각';
+  return time;
+}
 const personalStore=createPersonalStore();
 let personalEntries=Object.create(null),storageWarning='';
 function readPersonal(){
@@ -82,6 +93,10 @@ function render(){
   $('#top-word').textContent=state.saved?'이 브라우저':d.keywords[0]?.word||'—';
   $('#top-word-caption').textContent=state.saved?'다른 사람·기기와 공유되지 않음':'현재 필터 기준';
   const complete=d.runs.find(r=>r.finished_at);
+  const scope=d.scope;
+  $('#keyword-period').textContent=scope?.startAt&&scope?.endAt?`집계: ${timestamp(scope.startAt)} ~ ${timestamp(scope.endAt)}`:'집계 기간 확인 중';
+  $('#keyword-asof').textContent=`최근 수집 완료: ${complete?.finished_at?timestamp(complete.finished_at):'이력 없음'} · 한국 시간`;
+  $('#keyword-scope').textContent=scope?`${scope.topic||'전체'} · ${scope.days===0?'전체 기간':scope.days===1?'최근 24시간':`최근 ${scope.days}일`} · ${d.capped?'최신 ':''}${d.articles.length.toLocaleString()}건 분석${scope.search?` · 검색어 “${scope.search}”`:''}`:'';
   $('#last-run').textContent=date(complete?.finished_at,true);
   $('#run-state').textContent=complete?({success:'정상 수집 완료',partial:'일부 수집 실패 · 아래 상태 확인',failed:'수집 실패 · 아래 상태 확인'}[complete.status]||complete.status):'수집 이력이 없습니다.';
   const messages=[];
@@ -120,7 +135,7 @@ function renderArticles(){
   const start=(state.page-1)*15;
   rows.slice(start,start+15).forEach(a=>{
     const item=el('article',undefined,'news-item'),content=el('div'),meta=el('div',undefined,'news-meta');
-    a.topics.forEach(t=>meta.append(el('span',t,'tag')));meta.append(el('span',date(a.published_at,true)));
+    a.topics.forEach(t=>meta.append(el('span',t,'tag')));meta.append(publishedTime(a.published_at));
     const h=el('h3'),open=el('button',a.title);open.onclick=()=>detail(a);h.append(open);
     content.append(meta,h,el('p',a.description,'news-description'));
     if(a.note)content.append(el('div','메모가 있는 기사','note-mark'));
@@ -137,7 +152,8 @@ $('#prev').onclick=()=>{state.page--;renderArticles();};$('#next').onclick=()=>{
 $('#close-dialog').onclick=()=>$('#article-dialog').close();
 function detail(a){
   const box=$('#article-detail');box.replaceChildren();
-  box.append(el('span',`${a.topics.join(' · ')} / ${date(a.published_at,true)}`,'eyebrow'),el('h2',a.title),el('p',a.description),el('small','네이버 검색 결과 설명문입니다. 기사 전문은 원문에서 확인하세요.','fine'));
+  const meta=el('div',undefined,'news-meta');meta.append(el('span',a.topics.join(' · ')),publishedTime(a.published_at));
+  box.append(meta,el('h2',a.title),el('p',a.description),el('small','네이버 검색 결과 설명문입니다. 기사 전문은 원문에서 확인하세요.','fine'));
   const label=el('label','나만의 메모 · 이 브라우저에 저장');label.htmlFor='note';
   const note=el('textarea');note.id='note';note.value=a.note;note.maxLength=5000;
   const actions=el('div',undefined,'detail-actions'),save=el('button','메모 저장','primary'),link=el('a','기사 원문 보기 ↗'),message=el('div','','detail-feedback');message.setAttribute('role','status');
